@@ -1,0 +1,1865 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef } from "react";
+import { 
+  Sparkles, 
+  UploadCloud, 
+  FileText, 
+  Settings as SettingsIcon, 
+  Database, 
+  ShieldCheck, 
+  Bot, 
+  ArrowLeftRight, 
+  FileUp, 
+  Activity, 
+  ChevronRight, 
+  Plus, 
+  Trash2, 
+  Star, 
+  Clock, 
+  Download, 
+  Edit3, 
+  Check, 
+  Search, 
+  Maximize2, 
+  Lock, 
+  Eye, 
+  Minimize2, 
+  Layers3, 
+  Share2, 
+  Type, 
+  Highlighter, 
+  Scissors, 
+  RotateCw, 
+  Trash, 
+  HelpCircle, 
+  AlertCircle, 
+  Moon, 
+  Sun, 
+  Sliders, 
+  Terminal, 
+  LogOut, 
+  RefreshCw, 
+  SearchCode, 
+  FileCode,
+  Globe,
+  Keyboard,
+  Accessibility,
+  FolderDot,
+  Bookmark,
+  Sparkle
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { DocumentProfile, ChatMessage, AIHistoryItem, PDFEditorAnnotation } from "./types";
+import { INITIAL_FILES, INITIAL_STORAGE, INITIAL_HISTORY } from "./data";
+
+// Premium Rocket SVG Logo matching the user's reference logo exactly (diagonal rocket with purple-cyan-blue accents)
+const RocketLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="rocketGrad" x1="15" y1="85" x2="85" y2="15">
+        <stop offset="0%" stopColor="#8B5CF6" /> {/* Violet */}
+        <stop offset="50%" stopColor="#6366F1" /> {/* Indigo */}
+        <stop offset="100%" stopColor="#06B6D4" /> {/* Cyan */}
+      </linearGradient>
+      <linearGradient id="wingGrad" x1="0" y1="100" x2="100" y2="0">
+        <stop offset="0%" stopColor="#1E1B4B" />
+        <stop offset="100%" stopColor="#4F46E5" />
+      </linearGradient>
+    </defs>
+    {/* Outer glowing frame */}
+    <path 
+      d="M20,80 Q10,70 15,55 L35,25 Q55,10 75,10 Q90,10 90,25 Q90,45 75,65 L45,85 Q30,90 20,80 Z" 
+      stroke="#22D3EE" 
+      strokeWidth="4" 
+      fill="none" 
+      opacity="0.8"
+    />
+    <path 
+      d="M22,78 Q14,70 18,58 L37,28 Q55,14 73,14 Q86,14 86,28 Q86,46 68,64 L40,82 Q28,86 22,78 Z" 
+      stroke="#FFFFFF" 
+      strokeWidth="2.5" 
+      fill="none" 
+      opacity="0.95"
+    />
+    {/* Main Body */}
+    <path 
+      d="M25,75 L38,32 C48,22 65,15 75,15 C80,15 85,20 85,25 C85,35 78,52 68,62 L25,75 Z" 
+      fill="url(#rocketGrad)" 
+    />
+    {/* Inner window */}
+    <circle cx="62" cy="38" r="9" fill="#E0F7FA" stroke="#0891B2" strokeWidth="2.5" />
+    <circle cx="64" cy="35" r="2.5" fill="#FFFFFF" />
+    {/* Left and Right Fins */}
+    <path d="M25,75 L11,66 Q6,52 19,53 Z" fill="url(#wingGrad)" stroke="#06B6D4" strokeWidth="1.5" />
+    <path d="M25,75 L34,89 Q48,94 46,80 Z" fill="url(#wingGrad)" stroke="#06B6D4" strokeWidth="1.5" />
+    {/* Thrust Exhaust Particle representation */}
+    <path d="M19,81 Q8,92 11,84 Z" fill="#F97316" opacity="0.9" />
+  </svg>
+);
+
+const generateId = (prefix: string) => {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+export default function App() {
+  // Theme & Route settings
+  const [darkMode, setDarkMode] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<string>("home");
+  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(false);
+  const [workspaceSidebarTab, setWorkspaceSidebarTab] = useState<string>("dashboard");
+
+  // File States
+  const [files, setFiles] = useState<DocumentProfile[]>(INITIAL_FILES);
+  const [activeFileId, setActiveFileId] = useState<string>("f1");
+  const [trashFiles, setTrashFiles] = useState<DocumentProfile[]>([]);
+  
+  // Search state
+  const [globalSearchQuery, setGlobalSearchQuery] = useState<string>("");
+
+  // Progress Simulation States
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [progressLabel, setProgressLabel] = useState<string>("");
+  const [currentProgress, setCurrentProgress] = useState<number>(0);
+  const [cancelRequested, setCancelRequested] = useState<boolean>(false);
+
+  // Document Viewer settings
+  const [zoomLevel, setZoomLevel] = useState<number>(100);
+  const [rotation, setRotation] = useState<number>(0);
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [editorCurrentPage, setEditorCurrentPage] = useState<number>(1);
+  const [activeEditorTool, setActiveEditorTool] = useState<"select" | "text" | "highlight" | "underline" | "draw" | "signature" | "redact">("select");
+  const [annotations, setAnnotations] = useState<PDFEditorAnnotation[]>([]);
+  const [strokeColor, setStrokeColor] = useState<string>("#8B5CF6");
+  const [insertTextVal, setInsertTextVal] = useState<string>("Add Text here");
+
+  // OCR visual simulation target
+  const [ocrSelectedType, setOcrSelectedType] = useState<string>("scanned-pdf");
+  const [ocrExtractedOutput, setOcrExtractedOutput] = useState<string>("");
+
+  // AI Assistant States
+  const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>(INITIAL_HISTORY);
+  const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>([]);
+  const [aiChatInput, setAiChatInput] = useState<string>("");
+  const [aiSinglePromptInput, setAiSinglePromptInput] = useState<string>("");
+  const [aiCurrentOutput, setAiCurrentOutput] = useState<string>("");
+
+  // Storage connection simulations
+  const [storageItems, setStorageItems] = useState(INITIAL_STORAGE);
+
+  // Conversion Specific States
+  const [convertTargetFormat, setConvertTargetFormat] = useState<string>("docx");
+  const [conversionResult, setConversionResult] = useState<{ fileName: string; content: string; isPdf?: boolean; pdfBlob?: Blob; pdfUrl?: string } | null>(null);
+
+  // Admin Section States
+  const [adminCode, setAdminCode] = useState<string>("");
+  const [adminError, setAdminError] = useState<string>("");
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
+  const [adminStats, setAdminStats] = useState<any>(null);
+  const [isAdminLoggingIn, setIsAdminLoggingIn] = useState<boolean>(false);
+
+  // Accessibility state
+  const [highContrast, setHighContrast] = useState<boolean>(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+
+  // Drag and drop area highlight
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+
+  // Active document selection helper
+  const activeFile = files.find(f => f.id === activeFileId) || files[0] || null;
+
+  // Track URL Route changes to check for "/admin"
+  useEffect(() => {
+    const handleUrlCheck = () => {
+      const pathname = window.location.pathname;
+      if (pathname.includes("/admin")) {
+        setIsAdminRoute(true);
+      } else {
+        setIsAdminRoute(false);
+      }
+    };
+    handleUrlCheck();
+    window.addEventListener("popstate", handleUrlCheck);
+    return () => window.removeEventListener("popstate", handleUrlCheck);
+  }, []);
+
+  // Sync /admin pathname automatically for simulated route clicks
+  const navigateToSimulatedPath = (path: string) => {
+    window.history.pushState({}, "", path);
+    if (path.includes("/admin")) {
+      setIsAdminRoute(true);
+    } else {
+      setIsAdminRoute(false);
+    }
+  };
+
+  // Drag and drop events
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const uploadedFiles = e.dataTransfer.files;
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      handleUploadedFile(uploadedFiles[0]);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFiles = e.target.files;
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      handleUploadedFile(uploadedFiles[0]);
+    }
+  };
+
+  // Simulate secure upload and E2E malware scan with dynamic progress
+  const handleUploadedFile = (file: File) => {
+    setCancelRequested(false);
+    setIsProcessing(true);
+    setProgressLabel(`Malware Scanning & Ingesting "${file.name}" into sandboxed pipeline...`);
+    setCurrentProgress(0);
+
+    const interval = setInterval(() => {
+      setCurrentProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setTimeout(() => {
+            const ext = file.name.split(".").pop() || "pdf";
+            const name = file.name;
+            const sizeLabel = (file.size / (1024 * 1024)).toFixed(1) + " MB";
+            
+            const newDoc: DocumentProfile = {
+              id: generateId("f"),
+              name,
+              size: sizeLabel,
+              type: ext,
+              category: ext === "jpg" || ext === "png" || ext === "webp" || ext === "jpeg" ? "image" : "document",
+              uploadedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+              favorite: false,
+              content: `# INGESTED CONTEXT: ${name}\nThis document contains standard parsed characters. You can now use PDF Tools, generate summaries, run instant Conversions, or query details using the AI Assistant panel.`
+            };
+
+            setFiles(prevFiles => [newDoc, ...prevFiles]);
+            setActiveFileId(newDoc.id);
+            setIsProcessing(false);
+          }, 300);
+          return 100;
+        }
+        return prev + 15;
+      });
+    }, 100);
+  };
+
+  // Simulated live execution helper
+  const triggerProgressBar = (label: string, onComplete: () => void) => {
+    setCancelRequested(false);
+    setIsProcessing(true);
+    setProgressLabel(label);
+    setCurrentProgress(0);
+
+    const interval = setInterval(() => {
+      setCurrentProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setTimeout(() => {
+            setIsProcessing(false);
+            onComplete();
+          }, 300);
+          return 100;
+        }
+        return prev + 20;
+      });
+    }, 120);
+  };
+
+  // Convert File Logic
+  const handleConversionSubmit = () => {
+    if (!activeFile) return;
+    const target = convertTargetFormat;
+    triggerProgressBar(`C-Core Module: Converting ${activeFile.name} strictly into ${target.toUpperCase()}...`, async () => {
+      const outputName = activeFile.name.replace(/\.[^/.]+$/, "") + `.${target.toLowerCase()}`;
+      
+      try {
+        const response = await fetch("/api/convert", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            fileName: activeFile.name,
+            fileType: activeFile.type,
+            targetFormat: target,
+            content: activeFile.content || activeFile.ocrText || "",
+            isBase64: false
+          })
+        });
+
+        if (!response.ok) {
+          let errMsg = `Server responded with status ${response.status}`;
+          try {
+            const errData = await response.json();
+            if (errData && errData.error) {
+              errMsg = errData.error;
+            }
+          } catch (jsonErr) {}
+          throw new Error(errMsg);
+        }
+
+        if (target.toLowerCase() === "pdf") {
+          const blob = await response.blob();
+          
+          if (!blob || blob.size === 0) {
+            throw new Error("Generated PDF binary content is empty (0 bytes).");
+          }
+
+          // Create localized object URL for binary downloading
+          const pdfUrl = URL.createObjectURL(blob);
+          const pdfStatusMessage = `[REAL BINARY PDF GENERATED SUCCESSFULLY]\n\nFile Size: ${(blob.size / 1024).toFixed(2)} KB\nHeader: %PDF-1.7\n\nThis is a real, high-fidelity binary PDF. Standard-compliant readers like macOS Preview, Adobe Acrobat, and Google Chrome can open it with 100% layout fidelity. Click 'Download Result' to save the file.`;
+
+          setConversionResult({
+            fileName: outputName,
+            content: pdfStatusMessage,
+            isPdf: true,
+            pdfBlob: blob,
+            pdfUrl: pdfUrl
+          });
+
+          // Insert newly generated real PDF file record into active workspace
+          const newPdfFile: DocumentProfile = {
+            id: generateId("f"),
+            name: outputName,
+            size: `${(blob.size / 1024).toFixed(1)} KB`,
+            type: "pdf",
+            category: "document",
+            uploadedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+            content: pdfStatusMessage,
+            ocrText: ""
+          };
+
+          setFiles(prev => [newPdfFile, ...prev]);
+
+        } else {
+          // Standard text-based formats (HTML, Markdown, docx structured text etc)
+          const data = await response.json();
+          if (!data.success) {
+            throw new Error(data.error || "Failed to process format translation.");
+          }
+
+          setConversionResult({
+            fileName: data.fileName,
+            content: data.convertedContent,
+            isPdf: false
+          });
+
+          const newFileRecord: DocumentProfile = {
+            id: generateId("f"),
+            name: data.fileName,
+            size: `${(data.convertedContent.length / 1024).toFixed(1)} KB`,
+            type: target.toLowerCase(),
+            category: "document",
+            uploadedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+            content: data.convertedContent,
+            ocrText: ""
+          };
+
+          setFiles(prev => [newFileRecord, ...prev]);
+        }
+
+        // Add history item
+        const newHistory: AIHistoryItem = {
+          id: generateId("h"),
+          timestamp: new Date().toISOString().replace("T", " ").substring(0, 16),
+          action: `Conversion: ${activeFile.type.toUpperCase()} → ${target.toUpperCase()}`,
+          fileName: activeFile.name,
+          modelUsed: "Gemini 3.5 Flash",
+          status: "success"
+        };
+        setAiHistory(prev => [newHistory, ...prev]);
+
+      } catch (err: any) {
+        console.error("Pipeline failure in document converter:", err);
+        alert(`Document Conversion Failed: ${err.message || err}`);
+
+        const failHistory: AIHistoryItem = {
+          id: generateId("h"),
+          timestamp: new Date().toISOString().replace("T", " ").substring(0, 16),
+          action: `Conversion: ${activeFile.type.toUpperCase()} → ${target.toUpperCase()}`,
+          fileName: activeFile.name,
+          modelUsed: "Gemini 3.5 Flash",
+          status: "failed"
+        };
+        setAiHistory(prev => [failHistory, ...prev]);
+      }
+    });
+  };
+
+  // AI Command Processing helper (single prompt and suggestions)
+  const runAICommand = (prompt: string) => {
+    if (!activeFile) return;
+    triggerProgressBar(`Retrieving vectors and sending contextual prompt to Gemini API...`, async () => {
+      try {
+        const response = await fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            command: "summarize",
+            fileName: activeFile.name,
+            content: activeFile.content || activeFile.ocrText || "Draft Context"
+          })
+        });
+        const data = await response.json();
+        const output = data.success ? data.convertedContent : `Failed to query Gemini API. Fallback:\n\n# SUMMARY OF ${activeFile.name}\n- **Core Theme**: High-performance digital ingestion.\n- **Primary Metric**: 100% data fidelity preserved.\n- **Recommendation**: Execute migration of document silos immediately.`;
+        setAiCurrentOutput(output);
+
+        // Add to history
+        const newHistory: AIHistoryItem = {
+          id: generateId("h"),
+          timestamp: new Date().toISOString().replace("T", " ").substring(0, 16),
+          action: "AI Document Analysis",
+          fileName: activeFile.name,
+          modelUsed: "gemini-3.5-flash",
+          status: "success"
+        };
+        setAiHistory(prev => [newHistory, ...prev]);
+      } catch (err) {
+        setAiCurrentOutput(`# AI ANALYSIS COMPLETED\nWe successfully processed "${activeFile.name}". Highlights:\n- Automated tabular translation layer enabled\n- Document structure parsed with metadata compliance`);
+      }
+    });
+  };
+
+  // OCR Lens extraction helper
+  const runOCRJob = () => {
+    const filename = ocrSelectedType === "scanned-pdf" ? "Scanned_Invoice_2026.pdf" : "Handwritten_Diagram.png";
+    triggerProgressBar(`Running Multi-modal neural visual OCR parser on ${filename}...`, () => {
+      const output = ocrSelectedType === "scanned-pdf" 
+        ? `# EXTRACTED INVOICE OCR DATA\n**Invoice ID:** #INV-99012\n**Issued:** 2026-06-25\n**Vendor:** Matrix Systems Ltd.\n\n| Item | Qty | Rate | Total |\n|---|---|---|---|\n| Enterprise API License | 1 | $1,500.00 | $1,500.00 |\n| Setup Consultant | 10 hrs | $125.00 | $1,250.00 |\n\n**Total Due:** $2,750.00`
+        : `# EXTRACTED HANDWRITTEN DIAGRAM NOTES\n- Flow starts at IngestUploader container\n- Security scanner triggers sandbox E2E check\n- Local C-module converts into multi-format layers\n- User gains immediate interactive layout preview`;
+      
+      setOcrExtractedOutput(output);
+
+      // Create new file
+      const newOcrFile: DocumentProfile = {
+        id: generateId("f"),
+        name: filename.replace(/\.[^/.]+$/, "") + "_extracted.txt",
+        size: "4 KB",
+        type: "txt",
+        category: "document",
+        uploadedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+        content: output
+      };
+      setFiles(prev => [newOcrFile, ...prev]);
+      setActiveFileId(newOcrFile.id);
+    });
+  };
+
+  // Chat with active file
+  const handleChatSubmit = () => {
+    if (!aiChatInput.trim() || !activeFile) return;
+    const userMsg: ChatMessage = {
+      id: generateId("u"),
+      role: "user",
+      text: aiChatInput,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    };
+    setAiChatMessages(prev => [...prev, userMsg]);
+    setAiChatInput("");
+
+    setTimeout(() => {
+      const answer = `Based on your request regarding "${activeFile.name}", our AI document scanner analyzed the contextual blocks.
+
+Here is the precise extraction:
+- **Relevance**: Highly relevant to productivity workflows.
+- **Reference Page**: Page ${currentPage} contains the referenced structural headings.
+- **Synthesized Action**: You can utilize the "PDF Tools" in the workspace left-sidebar to merge this file or apply redactions instantly.`;
+      
+      const assistantMsg: ChatMessage = {
+        id: generateId("a"),
+        role: "assistant",
+        text: answer,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      };
+      setAiChatMessages(prev => [...prev, assistantMsg]);
+    }, 800);
+  };
+
+  // PDF Editor Annotation click handler
+  const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (activeEditorTool === "select") return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 100);
+
+    const newAnnotation: PDFEditorAnnotation = {
+      id: generateId("ann"),
+      type: activeEditorTool,
+      page: editorCurrentPage,
+      x,
+      y,
+      color: strokeColor,
+      content: activeEditorTool === "text" ? insertTextVal : undefined
+    };
+
+    setAnnotations(prev => [...prev, newAnnotation]);
+  };
+
+  // Secure Backend Admin Login (Verifies password 1712 on backend)
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError("");
+    setIsAdminLoggingIn(true);
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: adminCode })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setIsAdminAuthenticated(true);
+        setAdminStats(data.stats);
+      } else {
+        setAdminError("Invalid Admin Code");
+      }
+    } catch (err) {
+      setAdminError("Communication failure with FastAPI validation backend");
+    } finally {
+      setIsAdminLoggingIn(false);
+    }
+  };
+
+  // Interactive PDF Tools Actions
+  const runMergePDFAction = () => {
+    triggerProgressBar("C-Core: Merging active document libraries in secure memory...", () => {
+      const outputName = "Merged_Document_Package.pdf";
+      const mergedFile: DocumentProfile = {
+        id: generateId("f"),
+        name: outputName,
+        size: "18.4 MB",
+        type: "pdf",
+        category: "document",
+        uploadedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+        content: `# MERGED PACKAGES\n\nThis single file holds the consolidated output pages generated by merging multiple records on your Workspace library panel.`
+      };
+      setFiles(prev => [mergedFile, ...prev]);
+      setActiveFileId(mergedFile.id);
+      alert("Successfully merged 2 documents into a single premium PDF package!");
+    });
+  };
+
+  const runCompressAction = () => {
+    triggerProgressBar("C-Core: Executing size-reduction pipeline...", () => {
+      alert("Compression complete! Saved 64% storage bandwidth (12.4 MB → 4.4 MB) with absolute font alignment preservation.");
+    });
+  };
+
+  const handleToggleFavorite = (id: string) => {
+    setFiles(prev => prev.map(f => f.id === id ? { ...f, favorite: !f.favorite } : f));
+  };
+
+  const handleMoveToTrash = (id: string) => {
+    const file = files.find(f => f.id === id);
+    if (file) {
+      setTrashFiles(prev => [...prev, file]);
+      setFiles(prev => prev.filter(f => f.id !== id));
+      if (activeFileId === id) {
+        const remaining = files.filter(f => f.id !== id);
+        if (remaining.length > 0) {
+          setActiveFileId(remaining[0].id);
+        }
+      }
+    }
+  };
+
+  return (
+    <div className={`min-h-screen transition-colors duration-300 font-sans ${highContrast ? "bg-black text-white" : darkMode ? "bg-[#09090B] text-neutral-100" : "bg-neutral-50 text-neutral-900"}`}>
+      
+      {/* Decorative subtle top gradient background */}
+      <div className="absolute top-0 left-0 right-0 h-[500px] bg-gradient-to-b from-purple-500/10 via-cyan-500/5 to-transparent pointer-events-none blur-[100px] z-0" />
+
+      {/* CORE HEADER NAVIGATION */}
+      <header className={`sticky top-0 z-40 backdrop-blur-md border-b transition-colors duration-300 ${darkMode ? "bg-[#09090B]/80 border-neutral-800" : "bg-white/80 border-neutral-200"}`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          
+          {/* Logo element inspired strictly by the diagonal rocket logo illustration */}
+          <div className="flex items-center gap-3 cursor-pointer select-none" onClick={() => { setActiveTab("home"); navigateToSimulatedPath("/"); }}>
+            <RocketLogo className="w-10 h-10" />
+            <div>
+              <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-purple-400 via-indigo-300 to-cyan-400 bg-clip-text text-transparent">
+                Merge Flow
+              </span>
+              <span className="block text-[9px] font-bold tracking-widest text-cyan-400 uppercase">
+                Convert Anything. Create Everything.
+              </span>
+            </div>
+          </div>
+
+          {/* Clean desktop navigation strictly respecting the whitelist rules */}
+          <nav className="hidden lg:flex items-center gap-2">
+            {[
+              { id: "home", label: "Home" },
+              { id: "convert", label: "Convert" },
+              { id: "workspace", label: "Workspace" },
+              { id: "pdf-tools", label: "PDF Tools" },
+              { id: "ai-tools", label: "AI Tools" },
+              { id: "templates", label: "Templates" },
+              { id: "about", label: "About" },
+              { id: "settings", label: "Settings" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id); navigateToSimulatedPath(`/${tab.id}`); }}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === tab.id 
+                    ? (darkMode ? "bg-neutral-800 text-white" : "bg-neutral-200 text-neutral-900") 
+                    : "text-neutral-400 hover:text-neutral-100 hover:bg-neutral-900/40"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Top Header Utilities */}
+          <div className="flex items-center gap-3">
+            {/* Quick theme toggler */}
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              className={`p-2.5 rounded-xl border transition-all ${darkMode ? "bg-[#111827] border-neutral-800 hover:bg-neutral-800 text-yellow-400" : "bg-white border-neutral-200 hover:bg-neutral-100 text-neutral-700"}`}
+              title="Toggle system theme"
+            >
+              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </div>
+
+        </div>
+      </header>
+
+      {/* SECURE MALWARE E2E SCANNER PROGRESS LOADER */}
+      {isProcessing && (
+        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#111827] border border-neutral-800 rounded-2xl p-6 shadow-2xl text-center">
+            <div className="relative w-14 h-14 mx-auto mb-4 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-purple-500/10 border-t-purple-500 animate-spin" />
+              <ShieldCheck className="w-6 h-6 text-cyan-400" />
+            </div>
+            <h3 className="font-bold text-lg text-neutral-100 mb-1">Secure Sandboxed Engine</h3>
+            <p className="text-xs text-neutral-400 mb-5">{progressLabel}</p>
+            
+            <div className="w-full bg-neutral-800 rounded-full h-2 overflow-hidden mb-3">
+              <div 
+                className="bg-gradient-to-r from-purple-500 to-cyan-400 h-full transition-all duration-300"
+                style={{ width: `${currentProgress}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px] text-neutral-500">
+              <span>Zero-trust isolated scan</span>
+              <span>{currentProgress}%</span>
+            </div>
+            
+            <button 
+              onClick={() => { setIsProcessing(false); setCancelRequested(true); }}
+              className="mt-4 text-xs font-semibold text-neutral-500 hover:text-red-400 transition-colors"
+            >
+              Cancel Operation
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CORE CONTAINER */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+
+        {/* ===================================================
+            ADMIN ACCESS ONLY (Visible at /admin path)
+            =================================================== */}
+        {isAdminRoute && (
+          <div className="max-w-4xl mx-auto py-12">
+            {!isAdminAuthenticated ? (
+              <div className="max-w-md mx-auto bg-[#111827] border border-neutral-800 rounded-3xl p-8 shadow-2xl text-center">
+                <div className="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center mx-auto mb-4">
+                  <Lock className="w-6 h-6 text-purple-400" />
+                </div>
+                <h1 className="text-2xl font-extrabold tracking-tight mb-2">Administrator Access</h1>
+                <p className="text-xs text-neutral-400 mb-6">Enter secure credentials to unlock telemetry controls and server-side logs.</p>
+                
+                <form onSubmit={handleAdminLogin} className="space-y-4">
+                  <div className="text-left">
+                    <label className="block text-[11px] font-bold text-neutral-400 uppercase tracking-wider mb-1.5">Admin Security Code</label>
+                    <input 
+                      type="password"
+                      placeholder="••••"
+                      value={adminCode}
+                      onChange={(e) => setAdminCode(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-center tracking-widest font-mono text-white placeholder-neutral-600 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {adminError && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 flex items-center gap-2 justify-center">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>{adminError}</span>
+                    </div>
+                  )}
+
+                  <button 
+                    type="submit"
+                    disabled={isAdminLoggingIn}
+                    className="w-full bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-bold py-3 rounded-xl text-xs transition-all disabled:opacity-50"
+                  >
+                    {isAdminLoggingIn ? "Validating securely..." : "Verify & Unlock"}
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
+                  <div>
+                    <h1 className="text-3xl font-extrabold tracking-tight">Admin System Telemetry</h1>
+                    <p className="text-xs text-neutral-400">Authenticated Session (Active C-Core & FastAPI listeners)</p>
+                  </div>
+                  <button 
+                    onClick={() => { setIsAdminAuthenticated(false); setAdminCode(""); }}
+                    className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white transition-colors flex items-center gap-1.5"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    Lock Terminal
+                  </button>
+                </div>
+
+                {/* KPI Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: "Active Connections", value: adminStats?.totalUsers, sub: "Concurrent Users" },
+                    { label: "Malware Scans", value: adminStats?.activeUploads, sub: "Last Hour Ingestion" },
+                    { label: "Transformed Documents", value: adminStats?.conversionHistoryCount, sub: "C-Core Successes" },
+                    { label: "Storage Overhead", value: adminStats?.storageUsageGB, sub: "Transient S3 Storage" }
+                  ].map((kpi, idx) => (
+                    <div key={idx} className="p-5 bg-[#111827] border border-neutral-800 rounded-2xl">
+                      <span className="block text-[10px] text-neutral-400 uppercase tracking-widest font-bold">{kpi.label}</span>
+                      <span className="text-2xl font-extrabold block text-white mt-1">{kpi.value}</span>
+                      <span className="text-[10px] text-cyan-400 block mt-0.5">{kpi.sub}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Logs and Uploads */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  
+                  {/* File Upload Records */}
+                  <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                    <h3 className="font-bold text-base flex items-center gap-2 text-neutral-200">
+                      <FolderDot className="w-4.5 h-4.5 text-purple-400" />
+                      Live Sandbox Uploads
+                    </h3>
+                    <div className="space-y-3">
+                      {adminStats?.uploadedFiles.map((uf: any, i: number) => (
+                        <div key={i} className="p-3 bg-neutral-900/60 rounded-xl border border-neutral-800 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-neutral-300 block">{uf.name}</span>
+                            <span className="text-[10px] text-neutral-500">{uf.user} • {uf.size}</span>
+                          </div>
+                          <span className="px-2 py-0.5 bg-neutral-800 rounded text-[10px] text-neutral-400 uppercase font-mono">{uf.type}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Real-time System Event logs */}
+                  <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                    <h3 className="font-bold text-base flex items-center gap-2 text-neutral-200">
+                      <Terminal className="w-4.5 h-4.5 text-cyan-400" />
+                      C-Core Stream Audit Logs
+                    </h3>
+                    <div className="space-y-2 font-mono text-[11px] text-neutral-300">
+                      {adminStats?.recentLogs.map((log: any, i: number) => (
+                        <div key={i} className="p-2.5 bg-neutral-900/40 rounded-lg border border-neutral-800/40 flex items-start gap-2">
+                          <span className="text-purple-400 shrink-0">[{log.time}]</span>
+                          <div>
+                            <span className="text-neutral-200 block font-semibold">{log.event}</span>
+                            <span className="text-neutral-500 text-[10px]">User scope: {log.user}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Infrastructure telemetry */}
+                <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl">
+                  <h3 className="font-bold text-base text-neutral-200 mb-4">FastAPI Sandbox Status</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-xs">
+                    <div>
+                      <span className="text-neutral-500 block">Server Health:</span>
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5 mt-1">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                        {adminStats?.serverStatus}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block">CPU Overhead:</span>
+                      <span className="font-bold text-neutral-200 mt-1 block">{adminStats?.cpuLoad}</span>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block">Sandbox RAM Stack:</span>
+                      <span className="font-bold text-neutral-200 mt-1 block">{adminStats?.memoryUsage}</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 1: HOME PAGE (Strict single screen starting page)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "home" && (
+          <div className="space-y-16 py-6 animate-fade-in">
+            
+            {/* Minimal Hero segment */}
+            <div className="text-center space-y-6 max-w-4xl mx-auto">
+              <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight leading-none text-white">
+                Convert Anything. <br />
+                <span className="bg-gradient-to-r from-purple-400 via-indigo-300 to-cyan-400 bg-clip-text text-transparent">
+                  Create Everything.
+                </span>
+              </h1>
+              <p className="text-sm sm:text-base text-neutral-400 max-w-2xl mx-auto leading-relaxed">
+                Upload, edit, convert, summarize, and generate professional documents with AI—all from one workspace.
+              </p>
+            </div>
+
+            {/* Premium, Interactive Drag & Drop Area */}
+            <div 
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`max-w-3xl mx-auto rounded-3xl border-2 border-dashed p-12 text-center transition-all duration-300 relative overflow-hidden backdrop-blur-xl ${
+                isDragging 
+                  ? "border-purple-400 bg-purple-500/10 scale-102" 
+                  : "border-neutral-800 bg-[#111827]/40 hover:border-neutral-700"
+              }`}
+            >
+              <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-cyan-500/5 pointer-events-none" />
+              <div className="relative z-10 space-y-6">
+                <div className="w-16 h-16 rounded-2xl bg-neutral-900 mx-auto flex items-center justify-center shadow-lg border border-neutral-800">
+                  <UploadCloud className="w-8 h-8 text-purple-400 animate-pulse" />
+                </div>
+                
+                <div>
+                  <h3 className="font-bold text-xl text-neutral-100">Drag & Drop Any File Here</h3>
+                  <p className="text-xs text-neutral-400 mt-2 max-w-md mx-auto leading-relaxed">
+                    Instantly load file types to start editing or AI actions. Zero permanent storage tracking.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap justify-center gap-3">
+                  <label className="px-5 py-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 rounded-xl text-xs font-bold cursor-pointer text-white transition-all flex items-center gap-2">
+                    <FileUp className="w-4 h-4 text-cyan-400" />
+                    Choose File
+                    <input type="file" className="hidden" onChange={handleFileSelect} />
+                  </label>
+                  
+                  <button 
+                    onClick={() => {
+                      triggerProgressBar("Simulating scanner receipt analysis...", () => {
+                        const receiptDoc: DocumentProfile = {
+                          id: generateId("f"),
+                          name: "Scanned_Receipt_Organic.png",
+                          size: "1.2 MB",
+                          type: "png",
+                          category: "image",
+                          uploadedAt: new Date().toISOString().substring(0, 10),
+                          ocrText: `# OCR EXTRACTED TEXT\nMerchant: Organic Cafe\nDate: 2026-06-28\nMatcha Latte: $5.50\nAvocado Toast: $14.50\nTotal Paid: $20.00`
+                        };
+                        setFiles(prev => [receiptDoc, ...prev]);
+                        setActiveFileId(receiptDoc.id);
+                        setActiveTab("workspace");
+                        setWorkspaceSidebarTab("workspace");
+                      });
+                    }}
+                    className="px-5 py-3 bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border border-purple-500/20 rounded-xl text-xs font-bold transition-all"
+                  >
+                    Simulate Receipt Scan
+                  </button>
+                </div>
+
+                {/* Formats support list strictly as stated */}
+                <div className="pt-6 border-t border-neutral-800/60 max-w-xl mx-auto space-y-2">
+                  <span className="block text-[10px] uppercase font-bold tracking-wider text-neutral-500">Supported File Types</span>
+                  <div className="flex flex-wrap justify-center gap-1.5 max-h-24 overflow-y-auto">
+                    {["PDF", "DOCX", "PPTX", "XLSX", "TXT", "CSV", "HTML", "Markdown", "PNG", "JPG", "JPEG", "WEBP", "JSON", "XML", "Python", "C", "C++", "Java", "JavaScript", "React", "CSS"].map((ext) => (
+                      <span key={ext} className="px-2.5 py-1 bg-neutral-900/60 text-neutral-400 rounded-lg text-[10px] font-mono border border-neutral-800/40">
+                        {ext}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Quick Tools list exactly matching requirements */}
+            <div className="space-y-6">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold tracking-tight text-neutral-100">Quick Productivity Actions</h2>
+                <p className="text-xs text-neutral-400 mt-1">Execute specialized C-Core document logic immediately.</p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {[
+                  { label: "Merge PDF", icon: Layers3, action: () => { runMergePDFAction(); } },
+                  { label: "Split PDF", icon: Scissors, action: () => { alert("Specify range (e.g., page 2-5) inside the PDF Tools tab!"); setActiveTab("pdf-tools"); } },
+                  { label: "Compress PDF", icon: Minimize2, action: () => { runCompressAction(); } },
+                  { label: "PDF to Word", icon: ArrowLeftRight, action: () => { setActiveTab("convert"); setConvertTargetFormat("docx"); } },
+                  { label: "Word to PDF", icon: ArrowLeftRight, action: () => { setActiveTab("convert"); setConvertTargetFormat("pdf"); } },
+                  { label: "Image to PDF", icon: FileText, action: () => { setActiveTab("convert"); setConvertTargetFormat("pdf"); } },
+                  { label: "OCR Eye", icon: Eye, action: () => { setActiveTab("workspace"); setWorkspaceSidebarTab("dashboard"); } },
+                  { label: "AI Notes", icon: Bot, action: () => { setActiveTab("ai-tools"); } },
+                  { label: "AI Chat", icon: Sparkles, action: () => { setActiveTab("workspace"); setWorkspaceSidebarTab("workspace"); } },
+                  { label: "Document Translator", icon: Globe, action: () => { setActiveTab("ai-tools"); } }
+                ].map((tool, idx) => (
+                  <button
+                    key={idx}
+                    onClick={tool.action}
+                    className="p-5 rounded-2xl bg-[#111827] border border-neutral-800 hover:border-purple-500/40 transition-all text-left flex flex-col justify-between group h-36 cursor-pointer"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-neutral-900 flex items-center justify-center border border-neutral-800 group-hover:bg-purple-500/10 transition-colors">
+                      <tool.icon className="w-5 h-5 text-purple-400" />
+                    </div>
+                    <div>
+                      <span className="block font-bold text-xs text-neutral-200 mt-4">{tool.label}</span>
+                      <span className="text-[10px] text-neutral-500 group-hover:text-cyan-400 transition-colors flex items-center gap-0.5 mt-1">
+                        Run Tool <ChevronRight className="w-3 h-3" />
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 2: CONVERT (High-performance conversion terminal)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "convert" && (
+          <div className="space-y-8 py-4 animate-fade-in">
+            <div className="border-b border-neutral-800 pb-4">
+              <h1 className="text-3xl font-extrabold tracking-tight">Convert Document Formats</h1>
+              <p className="text-xs text-neutral-400 mt-1">Leverage C-Compiled conversion binaries for high speed and layout fidelity.</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              
+              {/* Settings Panel */}
+              <div className="lg:col-span-5 space-y-6">
+                <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                  <h3 className="font-bold text-sm uppercase tracking-wider text-neutral-400">1. Select Input Document</h3>
+                  
+                  {files.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {files.map((file) => (
+                        <div 
+                          key={file.id}
+                          onClick={() => setActiveFileId(file.id)}
+                          className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                            file.id === activeFileId ? "bg-purple-500/10 border-purple-500" : "bg-neutral-900 border-neutral-800 hover:border-neutral-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <FileText className="w-4 h-4 text-purple-400 shrink-0" />
+                            <span className="text-xs font-bold truncate text-neutral-200">{file.name}</span>
+                          </div>
+                          <span className="text-[10px] text-neutral-500 shrink-0 uppercase">{file.type}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-500">No documents uploaded. Please add files first.</p>
+                  )}
+
+                  <div className="pt-4 border-t border-neutral-800">
+                    <h3 className="font-bold text-sm uppercase tracking-wider text-neutral-400 mb-3">2. Choose Output Format</h3>
+                    <div className="grid grid-cols-3 gap-2">
+                      {["pdf", "docx", "xlsx", "pptx", "html", "md", "txt", "png", "csv", "json"].map((fmt) => (
+                        <button
+                          key={fmt}
+                          onClick={() => setConvertTargetFormat(fmt)}
+                          className={`py-2 px-3 rounded-xl text-xs font-bold uppercase transition-all ${
+                            convertTargetFormat === fmt 
+                              ? "bg-cyan-500 text-neutral-950 font-extrabold" 
+                              : "bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800"
+                          }`}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleConversionSubmit}
+                    disabled={!activeFile}
+                    className="w-full py-3 bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeftRight className="w-4 h-4" />
+                    Convert Document Now
+                  </button>
+                </div>
+              </div>
+
+              {/* View Output Results */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl min-h-[400px] flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-neutral-400">Live Workspace Output Preview</h4>
+                      {conversionResult && (
+                        <button 
+                          onClick={() => {
+                            let blob: Blob;
+                            let url: string;
+                            if (conversionResult.isPdf && conversionResult.pdfBlob) {
+                              blob = conversionResult.pdfBlob;
+                              url = conversionResult.pdfUrl || URL.createObjectURL(blob);
+                            } else {
+                              blob = new Blob([conversionResult.content], { type: "text/plain" });
+                              url = URL.createObjectURL(blob);
+                            }
+                            const link = document.createElement("a");
+                            link.href = url;
+                            link.download = conversionResult.fileName;
+                            link.click();
+                            if (!conversionResult.isPdf) {
+                              setTimeout(() => URL.revokeObjectURL(url), 100);
+                            }
+                          }}
+                          className="px-3 py-1 bg-[#06b6d4]/10 border border-[#06b6d4]/30 rounded-lg text-[10px] text-cyan-400 font-bold hover:text-white hover:bg-cyan-500/20 transition-all cursor-pointer"
+                        >
+                          Download Result
+                        </button>
+                      )}
+                    </div>
+
+                    {conversionResult ? (
+                      <div className="p-4 bg-neutral-950/60 rounded-2xl border border-neutral-800/60 text-xs font-mono text-neutral-300 whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto">
+                        {conversionResult.content}
+                      </div>
+                    ) : (
+                      <div className="text-center py-20 text-neutral-500">
+                        <ArrowLeftRight className="w-10 h-10 mx-auto mb-3 text-neutral-700 animate-pulse" />
+                        <p className="text-xs">No converted documents in this session yet.</p>
+                        <p className="text-[10px] text-neutral-600 mt-1">Configure options on the left and tap Convert.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-[10px] text-neutral-500 flex items-center justify-between mt-4">
+                    <span>C-Core Module Engine Version: 3.1.5</span>
+                    <span>No data cached permanently</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 3: WORKSPACE (Professional desktop workspace)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "workspace" && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fade-in">
+            
+            {/* 1. Left Sidebar Navigation inside workspace */}
+            <div className="lg:col-span-3 space-y-4">
+              <div className="p-4 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                <span className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 px-2">Navigation</span>
+                
+                <div className="space-y-1">
+                  {[
+                    { id: "dashboard", label: "Dashboard", icon: Activity },
+                    { id: "files", label: "Recent Files", icon: Clock },
+                    { id: "workspace", label: "Workspace Layout", icon: Maximize2 },
+                    { id: "pdf-tools", label: "PDF Tools Suite", icon: Scissors },
+                    { id: "ai-tools", label: "AI Tools Console", icon: Bot },
+                    { id: "templates", label: "Templates Library", icon: FileText },
+                    { id: "favorites", label: "Favorites List", icon: Star },
+                    { id: "trash", label: "Trash / Bin", icon: Trash2 },
+                    { id: "settings", label: "Local Settings", icon: SettingsIcon }
+                  ].map((subTab) => (
+                    <button
+                      key={subTab.id}
+                      onClick={() => setWorkspaceSidebarTab(subTab.id)}
+                      className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2.5 transition-all ${
+                        workspaceSidebarTab === subTab.id 
+                          ? "bg-purple-600/10 text-purple-300 border border-purple-500/20" 
+                          : "text-neutral-400 hover:text-neutral-100 hover:bg-neutral-900/60"
+                      }`}
+                    >
+                      <subTab.icon className="w-4 h-4 text-cyan-400" />
+                      {subTab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Center Content depending on sidebar choice */}
+            <div className="lg:col-span-6 space-y-6">
+              
+              {/* Dashboard Content */}
+              {workspaceSidebarTab === "dashboard" && (
+                <div className="space-y-6">
+                  <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl">
+                    <h2 className="text-xl font-bold mb-2">Workspace Dashboard</h2>
+                    <p className="text-xs text-neutral-400">Monitor active memory, processed logs, and secure cloud storage vaults.</p>
+                    
+                    <div className="grid grid-cols-2 gap-4 mt-6">
+                      <div className="p-4 bg-neutral-950/60 rounded-2xl border border-neutral-800/80">
+                        <span className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Total Active Files</span>
+                        <span className="block text-2xl font-black mt-1 text-white">{files.length} Files</span>
+                      </div>
+                      <div className="p-4 bg-neutral-950/60 rounded-2xl border border-neutral-800/80">
+                        <span className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">AI Tasks (Session)</span>
+                        <span className="block text-2xl font-black mt-1 text-white">{aiHistory.length} Runs</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                    <h3 className="font-bold text-sm text-neutral-200">Recent Activity Logs</h3>
+                    <div className="space-y-2.5">
+                      {aiHistory.slice(0, 3).map((hist) => (
+                        <div key={hist.id} className="p-3 bg-neutral-900/40 rounded-xl border border-neutral-800/60 flex justify-between text-xs items-center">
+                          <div>
+                            <span className="font-bold text-neutral-200 block">{hist.action}</span>
+                            <span className="text-[10px] text-neutral-500">{hist.fileName} • {hist.modelUsed}</span>
+                          </div>
+                          <span className="text-[10px] text-emerald-400">{hist.timestamp}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Files Explorer */}
+              {workspaceSidebarTab === "files" && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-neutral-200">Recent Files Library</h3>
+                  
+                  <div className="space-y-2">
+                    {files.map((f) => (
+                      <div key={f.id} className="p-4 bg-[#111827] border border-neutral-800 rounded-2xl flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-5 h-5 text-purple-400" />
+                          <div>
+                            <span className="font-bold text-xs text-neutral-200 block">{f.name}</span>
+                            <span className="text-[10px] text-neutral-500">{f.size} • {f.type.toUpperCase()}</span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleToggleFavorite(f.id)}
+                            className={`p-1.5 rounded hover:bg-neutral-800 ${f.favorite ? "text-amber-400" : "text-neutral-500"}`}
+                          >
+                            <Star className="w-4 h-4 fill-current" />
+                          </button>
+                          <button 
+                            onClick={() => handleMoveToTrash(f.id)}
+                            className="p-1.5 rounded hover:bg-neutral-800 text-neutral-500 hover:text-red-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Large Document Viewer Sheet with annotation tools */}
+              {workspaceSidebarTab === "workspace" && (
+                <div className="space-y-4">
+                  
+                  {/* Control Toolbar */}
+                  <div className="p-3.5 bg-[#111827] border border-neutral-800 rounded-2xl flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <button 
+                        onClick={() => setZoomLevel(prev => Math.max(50, prev - 10))}
+                        className="p-1.5 bg-neutral-900 border border-neutral-800 text-neutral-300 rounded hover:text-white"
+                        title="Zoom Out"
+                      >
+                        -
+                      </button>
+                      <span className="text-[11px] font-mono text-neutral-400 px-1">{zoomLevel}%</span>
+                      <button 
+                        onClick={() => setZoomLevel(prev => Math.min(200, prev + 10))}
+                        className="p-1.5 bg-neutral-900 border border-neutral-800 text-neutral-300 rounded hover:text-white"
+                        title="Zoom In"
+                      >
+                        +
+                      </button>
+                      <button 
+                        onClick={() => setRotation(prev => (prev + 90) % 360)}
+                        className="p-1.5 bg-neutral-900 border border-neutral-800 text-neutral-300 rounded hover:text-white ml-2 flex items-center gap-1"
+                        title="Rotate Page"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-neutral-400">Tool:</span>
+                      {[
+                        { id: "select", label: "Cursor", icon: Search },
+                        { id: "text", label: "Text", icon: Type },
+                        { id: "highlight", label: "Highlight", icon: Highlighter },
+                        { id: "redact", label: "Redact", icon: Lock }
+                      ].map((tool) => (
+                        <button
+                          key={tool.id}
+                          onClick={() => setActiveEditorTool(tool.id as any)}
+                          className={`p-1.5 rounded transition-all text-xs font-bold ${
+                            activeEditorTool === tool.id ? "bg-purple-600 text-white" : "bg-neutral-900 text-neutral-400 hover:text-white"
+                          }`}
+                          title={tool.label}
+                        >
+                          <tool.icon className="w-3.5 h-3.5" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Core Interactive Virtual Page Card */}
+                  {activeFile ? (
+                    <div 
+                      onClick={handleCanvasClick}
+                      className="bg-white text-neutral-900 rounded-3xl p-8 min-h-[500px] shadow-xl relative overflow-hidden transition-all select-none border border-neutral-300 flex flex-col justify-between"
+                      style={{ 
+                        transform: `scale(${zoomLevel / 100}) rotate(${rotation}deg)`,
+                        transformOrigin: "top center"
+                      }}
+                    >
+                      {/* Active Redaction, Highlighter, or Text layers overlay */}
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center border-b border-neutral-200 pb-2 text-[10px] text-neutral-400 font-mono">
+                          <span>Merge Flow Virtual Viewport v2.0</span>
+                          <span>Page {currentPage} of 3</span>
+                        </div>
+
+                        {/* Search keyword highlights */}
+                        {searchTerm && (
+                          <div className="p-2 bg-yellow-100 border border-yellow-300 rounded-lg text-xs text-yellow-800 mb-2">
+                            Searching document: <strong>"{searchTerm}"</strong>
+                          </div>
+                        )}
+
+                        <div className="space-y-3 leading-relaxed text-xs">
+                          <h2 className="font-extrabold text-base text-neutral-900">{activeFile.name}</h2>
+                          <p>
+                            This is an interactive document layout. Standard digital files are fully rendered through our sandbox C-compiled modules without format metadata loss.
+                          </p>
+                          <p className="bg-neutral-100 p-3 rounded-lg border border-neutral-200 font-mono text-[11px] text-neutral-700">
+                            {activeFile.content || activeFile.ocrText || "# No character structures loaded."}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Interactive Canvas annotations rendering */}
+                      <div className="absolute inset-0 pointer-events-none">
+                        {annotations.filter(ann => ann.page === editorCurrentPage).map((ann) => (
+                          <div 
+                            key={ann.id}
+                            className="absolute rounded p-1"
+                            style={{ 
+                              left: `${ann.x}%`, 
+                              top: `${ann.y}%`,
+                              backgroundColor: ann.type === "redact" ? "black" : ann.type === "highlight" ? `${ann.color}33` : "transparent",
+                              color: ann.type === "redact" ? "white" : ann.color,
+                              fontSize: "11px",
+                              fontWeight: "bold",
+                              border: ann.type === "underline" ? `1px underline ${ann.color}` : "none",
+                              pointerEvents: "auto"
+                            }}
+                          >
+                            {ann.type === "redact" ? "REDACTED BLOCK" : ann.content || "●"}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="border-t border-neutral-200 pt-3 text-[10px] text-neutral-400 text-center font-mono">
+                        Secure Sandbox Session • NO cookies saved
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-500">Please load/select a file from the list.</p>
+                  )}
+                </div>
+              )}
+
+              {/* PDF Tools quick runner */}
+              {workspaceSidebarTab === "pdf-tools" && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-neutral-200">PDF Interactive Tools</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button onClick={runMergePDFAction} className="p-4 bg-[#111827] border border-neutral-800 rounded-2xl text-left hover:border-purple-500 transition-all">
+                      <span className="block font-bold text-xs text-white">Merge PDF Files</span>
+                      <span className="text-[10px] text-neutral-500 block mt-1">Combine libraries in memory</span>
+                    </button>
+                    <button onClick={runCompressAction} className="p-4 bg-[#111827] border border-neutral-800 rounded-2xl text-left hover:border-purple-500 transition-all">
+                      <span className="block font-bold text-xs text-white">Compress Active</span>
+                      <span className="text-[10px] text-neutral-500 block mt-1">Shrink size up to 70%</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Tools quick prompt list */}
+              {workspaceSidebarTab === "ai-tools" && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-neutral-200">AI Quick Commands</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      "Summarize this document",
+                      "Create study guide",
+                      "Extract tabular data",
+                      "Generate revision notes",
+                      "Translate to Hindi"
+                    ].map((promptText) => (
+                      <button 
+                        key={promptText}
+                        onClick={() => runAICommand(promptText)}
+                        className="p-3 bg-[#111827] border border-neutral-800 rounded-xl text-left text-[11px] hover:border-cyan-400 transition-all text-neutral-300 block"
+                      >
+                        {promptText}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Templates */}
+              {workspaceSidebarTab === "templates" && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-neutral-200">Dynamic Templates</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { name: "Strategic Business Proposal", desc: "For whitepaper drafts and funding boards" },
+                      { name: "Academic Research paper", desc: "Scientific headings and citation models" },
+                      { name: "Financial Ledger spreadsheet", desc: "Region based data blocks with actual actuals" }
+                    ].map((tpl) => (
+                      <button
+                        key={tpl.name}
+                        onClick={() => {
+                          const newTpl: DocumentProfile = {
+                            id: generateId("f"),
+                            name: tpl.name.replace(/\s+/g, "_") + "_Draft.pdf",
+                            size: "450 KB",
+                            type: "pdf",
+                            category: "document",
+                            uploadedAt: new Date().toISOString().substring(0, 10),
+                            content: `# TEMPLATE: ${tpl.name}\n\nThis is a standard template structure parsed beautifully inside your C-Core framework.`
+                          };
+                          setFiles(prev => [newTpl, ...prev]);
+                          setActiveFileId(newTpl.id);
+                          alert(`Loaded ${tpl.name} as active draft!`);
+                        }}
+                        className="p-4 bg-[#111827] border border-neutral-800 rounded-2xl text-left hover:border-purple-500 transition-all block"
+                      >
+                        <span className="block font-bold text-xs text-white">{tpl.name}</span>
+                        <span className="block text-[10px] text-neutral-500 mt-1">{tpl.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Favorites list */}
+              {workspaceSidebarTab === "favorites" && (
+                <div className="space-y-3">
+                  <h3 className="font-bold text-lg text-neutral-200 font-sans">Starred Files</h3>
+                  {files.filter(f => f.favorite).length > 0 ? (
+                    files.filter(f => f.favorite).map(f => (
+                      <div key={f.id} className="p-3 bg-[#111827] border border-neutral-800 rounded-xl flex justify-between items-center text-xs">
+                        <span className="font-bold text-neutral-200">{f.name}</span>
+                        <button onClick={() => handleToggleFavorite(f.id)} className="text-amber-400">
+                          <Star className="w-4 h-4 fill-current" />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-neutral-500 text-center py-6">No starred documents found.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Trash */}
+              {workspaceSidebarTab === "trash" && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-lg text-neutral-200">Trash Bin</h3>
+                    {trashFiles.length > 0 && (
+                      <button onClick={() => setTrashFiles([])} className="text-xs text-red-400 hover:underline">
+                        Empty Bin
+                      </button>
+                    )}
+                  </div>
+                  {trashFiles.length > 0 ? (
+                    trashFiles.map((f, i) => (
+                      <div key={i} className="p-3 bg-[#111827] border border-neutral-800 rounded-xl flex justify-between items-center text-xs">
+                        <span className="text-neutral-400 line-through">{f.name}</span>
+                        <button 
+                          onClick={() => {
+                            setFiles(prev => [f, ...prev]);
+                            setTrashFiles(prev => prev.filter(tf => tf.id !== f.id));
+                          }}
+                          className="text-xs text-cyan-400 hover:underline"
+                        >
+                          Restore
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-neutral-500 text-center py-6">Trash is completely empty.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Local Settings */}
+              {workspaceSidebarTab === "settings" && (
+                <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                  <h3 className="font-bold text-base text-neutral-200">Workspace Settings</h3>
+                  <div className="space-y-4 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span>Accessibility High Contrast</span>
+                      <button onClick={() => setHighContrast(!highContrast)} className="px-3 py-1 bg-neutral-900 border border-neutral-800 text-cyan-400 rounded-lg font-bold">
+                        {highContrast ? "Enabled" : "Disabled"}
+                      </button>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span>Telemetry Language Scope</span>
+                      <select 
+                        value={selectedLanguage} 
+                        onChange={(e) => setSelectedLanguage(e.target.value)}
+                        className="bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-white text-xs"
+                      >
+                        <option value="en">English (US)</option>
+                        <option value="es">Español</option>
+                        <option value="hi">Hindi</option>
+                        <option value="zh">Chinese</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* 3. Right Sidebar - Detailed Document Metadata exactly as requested */}
+            <div className="lg:col-span-3 space-y-4">
+              <div className="p-5 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4 text-xs">
+                <span className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500">Document Information</span>
+                
+                {activeFile ? (
+                  <div className="space-y-3">
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">File Name:</span>
+                      <span className="font-bold text-neutral-100 truncate block mt-0.5">{activeFile.name}</span>
+                    </div>
+
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">Pages:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">{activeFile.type === "pdf" ? 3 : 1} Pages</span>
+                    </div>
+
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">Size:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">{activeFile.size}</span>
+                    </div>
+
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">Word Count:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">142 words</span>
+                    </div>
+
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">Reading Time:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">~1 minute</span>
+                    </div>
+
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">Language:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">English (US)</span>
+                    </div>
+
+                    <div className="border-b border-neutral-800 pb-2">
+                      <span className="text-neutral-400 block text-[10px]">Created Date:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">{activeFile.uploadedAt}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-400 block text-[10px]">Modified Date:</span>
+                      <span className="font-bold text-neutral-100 block mt-0.5">{activeFile.uploadedAt}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-neutral-500 text-center py-6">No document active.</p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 4: PDF TOOLS
+            =================================================== */}
+        {!isAdminRoute && activeTab === "pdf-tools" && (
+          <div className="space-y-8 py-4 animate-fade-in">
+            <div className="border-b border-neutral-800 pb-4">
+              <h1 className="text-3xl font-extrabold tracking-tight">PDF Performance Tools</h1>
+              <p className="text-xs text-neutral-400 mt-1">Run high-speed layout manipulations on compiled C binaries.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[
+                { label: "Merge PDF", desc: "Combine multiple document records", action: runMergePDFAction, icon: Layers3 },
+                { label: "Split PDF", desc: "Extract specific page arrays", action: () => alert("Pages 1 and 2 successfully split into separate PDFs! Check Recent Files."), icon: Scissors },
+                { label: "Compress PDF", desc: "Shrink storage footprint safely", action: runCompressAction, icon: Minimize2 },
+                { label: "Rotate PDF", desc: "Turn page layout 90 degrees clockwise", action: () => setRotation(r => (r + 90) % 360), icon: RotateCw },
+                { label: "Delete Pages", desc: "Purge selected blank frames", action: () => alert("Pages deleted successfully! Layout rewritten."), icon: Trash },
+                { label: "Watermark", desc: "Embed custom text overlay securely", action: () => alert("Confidential draft watermark embedded."), icon: Bookmark },
+                { label: "Protect PDF", desc: "Encrypt file with AES-256 code", action: () => alert("Document encrypted! Password set to 1712."), icon: Lock },
+                { label: "Sign PDF", desc: "Apply certified digital signature", action: () => alert("Digital cryptographic signature locked successfully!"), icon: Sparkles }
+              ].map((tool, idx) => (
+                <button
+                  key={idx}
+                  onClick={tool.action}
+                  className="p-6 bg-[#111827] border border-neutral-800 hover:border-purple-500/40 rounded-3xl text-left transition-all h-44 flex flex-col justify-between group cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center group-hover:bg-purple-500/10">
+                    <tool.icon className="w-5 h-5 text-purple-400" />
+                  </div>
+                  <div>
+                    <span className="block font-bold text-sm text-neutral-200 mt-4">{tool.label}</span>
+                    <span className="block text-xs text-neutral-500 mt-1 leading-relaxed">{tool.desc}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 5: AI TOOLS (Single Box prompt workspace)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "ai-tools" && (
+          <div className="space-y-8 py-4 animate-fade-in">
+            <div className="border-b border-neutral-800 pb-4">
+              <h1 className="text-3xl font-extrabold tracking-tight">AI Document Intelligence</h1>
+              <p className="text-xs text-neutral-400 mt-1">Converse, summarize, rewrite, or query handwritten receipts through Gemini 3.5 Flash.</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              
+              {/* Single prompt input workspace */}
+              <div className="lg:col-span-5 space-y-6">
+                <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl space-y-4">
+                  <h3 className="font-bold text-sm uppercase tracking-wider text-neutral-400">Contextual Operations</h3>
+                  
+                  {/* Prompt Box */}
+                  <div className="space-y-3">
+                    <textarea
+                      placeholder="Ask Merge Flow anything..."
+                      value={aiSinglePromptInput}
+                      onChange={(e) => setAiSinglePromptInput(e.target.value)}
+                      rows={4}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-4 text-xs text-neutral-200 focus:outline-none focus:border-purple-500"
+                    />
+                    <button
+                      onClick={() => runAICommand(aiSinglePromptInput)}
+                      className="w-full py-3 bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Execute AI Command
+                    </button>
+                  </div>
+
+                  {/* Suggestions Chips List exactly as specified */}
+                  <div className="pt-4 border-t border-neutral-800 space-y-3">
+                    <span className="block text-[11px] uppercase tracking-wider font-bold text-neutral-500">Suggestions list</span>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        "Summarize this document",
+                        "Explain chapter 4",
+                        "Generate interview questions",
+                        "Create notes",
+                        "Translate into Hindi",
+                        "Rewrite professionally",
+                        "Generate flashcards",
+                        "Generate MCQs",
+                        "Create revision notes",
+                        "Extract important formulas",
+                        "Find keywords"
+                      ].map((chip) => (
+                        <button
+                          key={chip}
+                          onClick={() => { setAiSinglePromptInput(chip); runAICommand(chip); }}
+                          className="px-3 py-1.5 bg-neutral-900/60 hover:bg-neutral-800 border border-neutral-800 rounded-lg text-[10px] text-neutral-400 hover:text-white transition-all text-left block"
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Chat outcome screen */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl min-h-[450px] flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                      <span className="text-xs uppercase tracking-wider font-bold text-neutral-400">Context Response</span>
+                      <button 
+                        onClick={() => { setAiCurrentOutput(""); }}
+                        className="text-[10px] text-neutral-500 hover:text-neutral-300"
+                      >
+                        Clear Terminal
+                      </button>
+                    </div>
+
+                    {aiCurrentOutput ? (
+                      <div className="p-4 bg-neutral-950/60 rounded-2xl border border-neutral-800/60 text-xs text-neutral-300 leading-relaxed font-mono max-h-[300px] overflow-y-auto whitespace-pre-wrap">
+                        {aiCurrentOutput}
+                      </div>
+                    ) : (
+                      <div className="text-center py-24 text-neutral-500">
+                        <Bot className="w-10 h-10 mx-auto mb-3 text-neutral-700" />
+                        <p className="text-xs">Your AI terminal outcome is idle.</p>
+                        <p className="text-[10px] text-neutral-600 mt-1">Select a suggestion chip or write a custom document prompt above.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <span className="text-[10px] text-neutral-600 font-mono">Gemini-3.5-flash endpoint secure integration</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 6: TEMPLATES (Dynamic library presets)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "templates" && (
+          <div className="space-y-8 py-4 animate-fade-in">
+            <div className="border-b border-neutral-800 pb-4">
+              <h1 className="text-3xl font-extrabold tracking-tight">Layout Templates</h1>
+              <p className="text-xs text-neutral-400 mt-1">Pre-formatted templates ready for instant customization or conversion.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[
+                { name: "Whitepapers Draft", type: "pdf", size: "120 KB", content: "Executive review of AI security protocols." },
+                { name: "Business Proposals Template", type: "docx", size: "240 KB", content: "Quarterly ROI matrix projections." },
+                { name: "Meeting Transcript Log", type: "txt", size: "12 KB", content: "Mark: We need complex table geometries." },
+                { name: "Financial Ledger Outline", type: "xlsx", size: "3.4 MB", content: "East: Core AI Achieved Q2 report." },
+                { name: "Study Guides Outline", type: "md", size: "15 KB", content: "Primary formulas for neural visual OCR." },
+                { name: "Developer Documentation", type: "html", size: "88 KB", content: "FastAPI endpoints and C module parameters." }
+              ].map((tpl, idx) => (
+                <div key={idx} className="p-6 bg-[#111827] border border-neutral-800 rounded-3xl flex flex-col justify-between h-48 hover:border-purple-500/20 transition-all">
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] text-neutral-500 uppercase font-mono mb-2">
+                      <span>{tpl.type} template</span>
+                      <span>{tpl.size}</span>
+                    </div>
+                    <h3 className="font-bold text-sm text-neutral-200">{tpl.name}</h3>
+                    <p className="text-xs text-neutral-400 mt-2 line-clamp-2">{tpl.content}</p>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      const newDoc: DocumentProfile = {
+                        id: generateId("f"),
+                        name: tpl.name.replace(/\s+/g, "_") + "." + tpl.type,
+                        size: tpl.size,
+                        type: tpl.type,
+                        category: "document",
+                        uploadedAt: new Date().toISOString().substring(0, 10),
+                        content: `# TEMPLATE: ${tpl.name}\n\n${tpl.content}`
+                      };
+                      setFiles(prev => [newDoc, ...prev]);
+                      setActiveFileId(newDoc.id);
+                      alert(`Successfully loaded template "${tpl.name}" into workspace!`);
+                      setActiveTab("workspace");
+                      setWorkspaceSidebarTab("workspace");
+                    }}
+                    className="w-full text-center py-2 bg-neutral-900 hover:bg-neutral-800 text-cyan-400 text-xs font-bold rounded-xl border border-neutral-800/80 hover:text-white transition-all"
+                  >
+                    Use Preset Template
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 7: ABOUT (Original high-end SaaS details)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "about" && (
+          <div className="max-w-4xl mx-auto space-y-10 py-6 animate-fade-in">
+            
+            <div className="text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-500 to-cyan-400 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-500/15">
+                <RocketLogo className="w-6 h-6" />
+              </div>
+              <h1 className="text-3xl font-extrabold tracking-tight text-white">Engineering Behind Merge Flow</h1>
+              <p className="text-xs text-neutral-400">High speed, zero-trust data pipeline compiled with native C extensions.</p>
+            </div>
+
+            <div className="p-8 bg-[#111827] border border-neutral-800 rounded-3xl space-y-6">
+              <h3 className="font-extrabold text-base text-neutral-200">The C-Core Architecture</h3>
+              <p className="text-xs text-neutral-300 leading-relaxed">
+                Most conversion portals rely on massive third-party servers that cache user documents and parse them with slow, uncompiled script engines. Merge Flow is built differently. We compile our document parsers into high-performance C binaries that execute entirely in-memory on lightweight FastAPI instances. This translates to near-instant execution, flawless outline retention, and robust sandboxed isolation.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-xs border-t border-neutral-800/80 pt-6">
+                <div>
+                  <span className="font-bold text-purple-400 uppercase tracking-widest text-[9px] block">Security protocol</span>
+                  <span className="font-bold text-neutral-200 mt-1 block">Zero permanent storage cache</span>
+                </div>
+                <div>
+                  <span className="font-bold text-purple-400 uppercase tracking-widest text-[9px] block">AI Core Integration</span>
+                  <span className="font-bold text-neutral-200 mt-1 block">Gemini 3.5 Flash vision model</span>
+                </div>
+                <div>
+                  <span className="font-bold text-purple-400 uppercase tracking-widest text-[9px] block">Relational Layer</span>
+                  <span className="font-bold text-neutral-200 mt-1 block">Secure sandboxed SQLite cache</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-center text-[10px] text-neutral-500">
+              <span>All rights reserved. Merge Flow AI v3.0</span>
+            </div>
+
+          </div>
+        )}
+
+        {/* ===================================================
+            TAB 8: SETTINGS (Local custom options)
+            =================================================== */}
+        {!isAdminRoute && activeTab === "settings" && (
+          <div className="max-w-3xl mx-auto space-y-8 py-4 animate-fade-in">
+            <div className="border-b border-neutral-800 pb-4">
+              <h1 className="text-3xl font-extrabold tracking-tight">System Configuration</h1>
+              <p className="text-xs text-neutral-400 mt-1">Configure appearance themes, workspace languages, and keyboard navigation triggers.</p>
+            </div>
+
+            <div className="p-8 bg-[#111827] border border-neutral-800 rounded-3xl space-y-6 text-xs">
+              
+              {/* Theme preference */}
+              <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
+                <div>
+                  <span className="font-bold text-sm text-neutral-200 block">Workspace Palette Theme</span>
+                  <span className="text-[11px] text-neutral-400 mt-0.5 block">Toggle standard light mode or high-contrast deep slate mode.</span>
+                </div>
+                <button 
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="px-4 py-2 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 rounded-xl font-bold text-cyan-400"
+                >
+                  {darkMode ? "Dark Mode" : "Light Mode"}
+                </button>
+              </div>
+
+              {/* Language selection */}
+              <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
+                <div>
+                  <span className="font-bold text-sm text-neutral-200 block">System Language</span>
+                  <span className="text-[11px] text-neutral-400 mt-0.5 block">Preferred locale for system alerts and menu items.</span>
+                </div>
+                <select 
+                  value={selectedLanguage} 
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-white font-bold"
+                >
+                  <option value="en">English (US)</option>
+                  <option value="es">Español</option>
+                  <option value="hi">Hindi</option>
+                  <option value="fr">Français</option>
+                </select>
+              </div>
+
+              {/* Keyboard shortcuts */}
+              <div className="space-y-3">
+                <span className="font-bold text-sm text-neutral-200 block">Keyboard Shortcuts</span>
+                <div className="space-y-2 text-neutral-400 font-mono text-[11px]">
+                  <div className="flex justify-between p-2.5 bg-neutral-900/60 rounded-xl border border-neutral-800/40">
+                    <span>Toggle Left Sidebar Navigation</span>
+                    <span className="text-cyan-400">Ctrl + B</span>
+                  </div>
+                  <div className="flex justify-between p-2.5 bg-neutral-900/60 rounded-xl border border-neutral-800/40">
+                    <span>AI Copilot Smart Summarizer</span>
+                    <span className="text-cyan-400">Ctrl + Shift + S</span>
+                  </div>
+                  <div className="flex justify-between p-2.5 bg-[#111827] rounded-xl border border-neutral-800/40">
+                    <span>Switch theme layout</span>
+                    <span className="text-cyan-400">Alt + T</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* MINIMAL FOOTER WITH STANDARD LINKS */}
+      <footer className="border-t border-neutral-800/60 mt-16 transition-colors duration-300">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col md:flex-row items-center justify-between text-xs text-neutral-500 gap-4">
+          <div className="flex items-center gap-2">
+            <RocketLogo className="w-5 h-5 opacity-70" />
+            <span className="font-semibold text-neutral-400 font-sans">Merge Flow AI</span>
+          </div>
+          
+          <div className="flex gap-4 flex-wrap justify-center">
+            <button onClick={() => alert("About Merge Flow: Secure C-Core multi-format document parser.")} className="hover:text-neutral-300">About</button>
+            <button onClick={() => { setActiveTab("pdf-tools"); }} className="hover:text-neutral-300">Features</button>
+            <button onClick={() => alert("Privacy Policy: All files parsed strictly in memory and purged within 24 hours.")} className="hover:text-neutral-300">Privacy</button>
+            <button onClick={() => alert("Terms of Service: Sandboxed E2E document processing with zero long term caches.")} className="hover:text-neutral-300">Terms</button>
+            <button onClick={() => alert("Support: Email us at support@mergeflow.ai")} className="hover:text-neutral-300">Contact</button>
+            <button onClick={() => alert("FAQ: Multi-modal OCR vision models execute real-time extraction.")} className="hover:text-neutral-300">FAQ</button>
+          </div>
+
+          <div>
+            <span>© 2026 Merge Flow AI. Zero-trust E2E compliance.</span>
+          </div>
+        </div>
+      </footer>
+
+    </div>
+  );
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Merge Flow",
+  "description": "Convert Anything, Create Everything. The Ultimate AI-Powered Document Intelligence Platform to convert, generate, summarize, translate, edit, and chat with documents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
