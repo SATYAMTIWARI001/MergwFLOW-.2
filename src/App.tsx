@@ -55,6 +55,11 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { DocumentProfile, ChatMessage, AIHistoryItem, PDFEditorAnnotation } from "./types";
 import { INITIAL_FILES, INITIAL_STORAGE, INITIAL_HISTORY } from "./data";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { Document as PdfDocument, Page as PdfPage, pdfjs } from "react-pdf";
+
+// Configure react-pdf worker source using standard robust unpkg CDN
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version || "4.4.168"}/build/pdf.worker.min.mjs`;
 
 // Premium Rocket SVG Logo matching the user's reference logo exactly (diagonal rocket with purple-cyan-blue accents)
 const RocketLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
@@ -103,6 +108,172 @@ const RocketLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
 
 const generateId = (prefix: string) => {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+// Client-side helper to compile clean, valid, standard binary PDF bytes on-the-fly
+const generateClientPdfBytes = async (title: string, content: string): Promise<Blob> => {
+  const pdfDoc = await PDFDocument.create();
+  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const pageWidth = 595.276;
+  const pageHeight = 841.890;
+  const margin = 50;
+  const printableWidth = pageWidth - 2 * margin;
+
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
+  let currentY = pageHeight - margin;
+
+  const drawHeader = () => {
+    page.drawText("MERGE FLOW AI • LIVE WORKSPACE PREVIEW", {
+      x: margin,
+      y: pageHeight - 35,
+      size: 8,
+      font: helveticaBold,
+      color: rgb(0.5, 0.4, 0.8),
+    });
+    page.drawLine({
+      start: { x: margin, y: pageHeight - 40 },
+      end: { x: pageWidth - margin, y: pageHeight - 40 },
+      thickness: 1,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+  };
+
+  const drawFooter = (pageNum: number) => {
+    page.drawLine({
+      start: { x: margin, y: 45 },
+      end: { x: pageWidth - margin, y: 45 },
+      thickness: 1,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+    page.drawText(`Page ${pageNum}`, {
+      x: pageWidth - margin - 35,
+      y: 30,
+      size: 8,
+      font: helveticaFont,
+      color: rgb(0.5, 0.5, 0.5),
+    });
+    page.drawText("Processed client-side via react-pdf + pdf-lib modules", {
+      x: margin,
+      y: 30,
+      size: 8,
+      font: helveticaFont,
+      color: rgb(0.5, 0.5, 0.5),
+    });
+  };
+
+  let pageCount = 1;
+  drawHeader();
+  drawFooter(pageCount);
+
+  const cleanTitle = title.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+  page.drawText(cleanTitle.toUpperCase(), {
+    x: margin,
+    y: currentY - 20,
+    size: 18,
+    font: helveticaBold,
+    color: rgb(0.1, 0.1, 0.15),
+  });
+  currentY -= 55;
+
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    if (line === "") {
+      currentY -= 12;
+      continue;
+    }
+
+    if (currentY < 80) {
+      page = pdfDoc.addPage([pageWidth, pageHeight]);
+      pageCount++;
+      drawHeader();
+      drawFooter(pageCount);
+      currentY = pageHeight - margin - 10;
+    }
+
+    let fontSize = 10;
+    let font = helveticaFont;
+    let color = rgb(0.2, 0.2, 0.25);
+    let isHeader = false;
+    let cleanLine = line;
+
+    if (line.startsWith("# ")) {
+      fontSize = 15;
+      font = helveticaBold;
+      color = rgb(0.1, 0.1, 0.15);
+      cleanLine = line.substring(2);
+      isHeader = true;
+      currentY -= 10;
+    } else if (line.startsWith("## ")) {
+      fontSize = 13;
+      font = helveticaBold;
+      color = rgb(0.15, 0.15, 0.2);
+      cleanLine = line.substring(3);
+      isHeader = true;
+      currentY -= 8;
+    } else if (line.startsWith("### ")) {
+      fontSize = 11;
+      font = helveticaBold;
+      color = rgb(0.2, 0.2, 0.25);
+      cleanLine = line.substring(4);
+      isHeader = true;
+      currentY -= 6;
+    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      cleanLine = "• " + line.substring(2);
+    } else if (line.startsWith("```")) {
+      currentY -= 5;
+      continue;
+    }
+
+    const words = cleanLine.split(" ");
+    let currentLineText = "";
+
+    for (const word of words) {
+      const testLine = currentLineText + (currentLineText ? " " : "") + word;
+      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+
+      if (testWidth > printableWidth) {
+        page.drawText(currentLineText, {
+          x: margin,
+          y: currentY,
+          size: fontSize,
+          font: font,
+          color: color,
+        });
+        currentY -= fontSize + 5;
+
+        if (currentY < 80) {
+          page = pdfDoc.addPage([pageWidth, pageHeight]);
+          pageCount++;
+          drawHeader();
+          drawFooter(pageCount);
+          currentY = pageHeight - margin - 10;
+        }
+
+        currentLineText = word;
+      } else {
+        currentLineText = testLine;
+      }
+    }
+
+    if (currentLineText) {
+      page.drawText(currentLineText, {
+        x: margin,
+        y: currentY,
+        size: fontSize,
+        font: font,
+        color: color,
+      });
+      currentY -= fontSize + (isHeader ? 12 : 6);
+    }
+  }
+
+  const pdfBytes = await pdfDoc.save();
+  return new Blob([pdfBytes], { type: "application/pdf" });
 };
 
 export default function App() {
@@ -154,6 +325,44 @@ export default function App() {
   // Conversion Specific States
   const [convertTargetFormat, setConvertTargetFormat] = useState<string>("docx");
   const [conversionResult, setConversionResult] = useState<{ fileName: string; content: string; isPdf?: boolean; pdfBlob?: Blob; pdfUrl?: string } | null>(null);
+
+  // PDF Preview Modal States
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string>("");
+  const [previewPdfName, setPreviewPdfName] = useState<string>("");
+  const [previewNumPages, setPreviewNumPages] = useState<number | null>(null);
+  const [previewPageNumber, setPreviewPageNumber] = useState<number>(1);
+  const [previewScale, setPreviewScale] = useState<number>(1.0);
+  const [isPreviewLoading, setIsPreviewLoading] = useState<boolean>(false);
+
+  // Helper to trigger the real PDF preview modal
+  const handleOpenPdfPreview = async (fileName: string, fileContent: string, existingBlob?: Blob, existingUrl?: string) => {
+    setIsPreviewLoading(true);
+    setPreviewPageNumber(1);
+    setPreviewScale(1.0);
+    setPreviewPdfName(fileName);
+    setIsPreviewOpen(true);
+
+    try {
+      if (existingUrl) {
+        setPreviewPdfUrl(existingUrl);
+      } else if (existingBlob) {
+        const url = URL.createObjectURL(existingBlob);
+        setPreviewPdfUrl(url);
+      } else {
+        // Generate real PDF on-the-fly client side from the contents of the file
+        const blob = await generateClientPdfBytes(fileName, fileContent);
+        const url = URL.createObjectURL(blob);
+        setPreviewPdfUrl(url);
+      }
+    } catch (err: any) {
+      console.error("Failed to load PDF preview:", err);
+      alert(`Error loading PDF preview: ${err.message || err}`);
+      setIsPreviewOpen(false);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
 
   // Admin Section States
   const [adminCode, setAdminCode] = useState<string>("");
@@ -1031,29 +1240,40 @@ Here is the precise extraction:
                     <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
                       <h4 className="font-bold text-xs uppercase tracking-wider text-neutral-400">Live Workspace Output Preview</h4>
                       {conversionResult && (
-                        <button 
-                          onClick={() => {
-                            let blob: Blob;
-                            let url: string;
-                            if (conversionResult.isPdf && conversionResult.pdfBlob) {
-                              blob = conversionResult.pdfBlob;
-                              url = conversionResult.pdfUrl || URL.createObjectURL(blob);
-                            } else {
-                              blob = new Blob([conversionResult.content], { type: "text/plain" });
-                              url = URL.createObjectURL(blob);
-                            }
-                            const link = document.createElement("a");
-                            link.href = url;
-                            link.download = conversionResult.fileName;
-                            link.click();
-                            if (!conversionResult.isPdf) {
-                              setTimeout(() => URL.revokeObjectURL(url), 100);
-                            }
-                          }}
-                          className="px-3 py-1 bg-[#06b6d4]/10 border border-[#06b6d4]/30 rounded-lg text-[10px] text-cyan-400 font-bold hover:text-white hover:bg-cyan-500/20 transition-all cursor-pointer"
-                        >
-                          Download Result
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {conversionResult.isPdf && (
+                            <button
+                              onClick={() => handleOpenPdfPreview(conversionResult.fileName, conversionResult.content, conversionResult.pdfBlob, conversionResult.pdfUrl)}
+                              className="px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-lg text-[10px] text-purple-400 font-bold hover:text-white hover:bg-purple-500/20 transition-all cursor-pointer flex items-center gap-1"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Preview PDF
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
+                              let blob: Blob;
+                              let url: string;
+                              if (conversionResult.isPdf && conversionResult.pdfBlob) {
+                                blob = conversionResult.pdfBlob;
+                                url = conversionResult.pdfUrl || URL.createObjectURL(blob);
+                              } else {
+                                blob = new Blob([conversionResult.content], { type: "text/plain" });
+                                url = URL.createObjectURL(blob);
+                              }
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.download = conversionResult.fileName;
+                              link.click();
+                              if (!conversionResult.isPdf) {
+                                setTimeout(() => URL.revokeObjectURL(url), 100);
+                              }
+                            }}
+                            className="px-3 py-1 bg-[#06b6d4]/10 border border-[#06b6d4]/30 rounded-lg text-[10px] text-cyan-400 font-bold hover:text-white hover:bg-cyan-500/20 transition-all cursor-pointer"
+                          >
+                            Download Result
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -1519,6 +1739,16 @@ Here is the precise extraction:
                       <span className="text-neutral-400 block text-[10px]">Modified Date:</span>
                       <span className="font-bold text-neutral-100 block mt-0.5">{activeFile.uploadedAt}</span>
                     </div>
+
+                    <div className="pt-4 border-t border-neutral-800">
+                      <button
+                        onClick={() => handleOpenPdfPreview(activeFile.name, activeFile.content || activeFile.ocrText || "")}
+                        className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-purple-900/20 active:scale-98 cursor-pointer text-xs"
+                      >
+                        <Eye className="w-4 h-4 text-purple-200" />
+                        Preview PDF Document
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-neutral-500 text-center py-6">No document active.</p>
@@ -1859,6 +2089,165 @@ Here is the precise extraction:
           </div>
         </div>
       </footer>
+
+      {/* PDF PREVIEW INTERACTIVE MODAL */}
+      <AnimatePresence>
+        {isPreviewOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/85 backdrop-blur-md p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-[#0b0f19] border border-neutral-800 rounded-3xl w-full max-w-4xl h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="p-5 border-b border-neutral-800 bg-[#0f1524] flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-500/10 border border-purple-500/20 rounded-xl">
+                    <FileText className="w-5 h-5 text-purple-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-neutral-100 truncate max-w-[200px] sm:max-w-md">{previewPdfName}</h3>
+                    <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Interactive Multi-Format Preview Portal</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Scale adjustment controls */}
+                  <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-1 gap-1">
+                    <button 
+                      onClick={() => setPreviewScale(s => Math.max(0.5, s - 0.1))} 
+                      disabled={previewScale <= 0.5}
+                      className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-all disabled:opacity-30 cursor-pointer"
+                      title="Zoom Out"
+                    >
+                      <Minimize2 className="w-4 h-4" />
+                    </button>
+                    <span className="text-[10px] font-bold font-mono text-neutral-300 w-12 text-center">
+                      {Math.round(previewScale * 100)}%
+                    </span>
+                    <button 
+                      onClick={() => setPreviewScale(s => Math.min(2.0, s + 0.1))} 
+                      disabled={previewScale >= 2.0}
+                      className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-all disabled:opacity-30 cursor-pointer"
+                      title="Zoom In"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Direct Download Button */}
+                  <button
+                    onClick={() => {
+                      const link = document.createElement("a");
+                      link.href = previewPdfUrl;
+                      link.download = previewPdfName;
+                      link.click();
+                    }}
+                    className="p-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:text-white hover:bg-cyan-500/20 rounded-xl transition-all flex items-center gap-1 cursor-pointer text-xs font-bold px-3"
+                    title="Download PDF File"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Download</span>
+                  </button>
+
+                  {/* Close button */}
+                  <button 
+                    onClick={() => {
+                      setIsPreviewOpen(false);
+                      // Avoid leaks if we created a temp url
+                      if (previewPdfUrl.startsWith("blob:") && (!conversionResult || previewPdfUrl !== conversionResult.pdfUrl)) {
+                        URL.revokeObjectURL(previewPdfUrl);
+                      }
+                    }}
+                    className="p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl text-neutral-400 hover:text-white transition-all cursor-pointer"
+                    title="Close Preview"
+                  >
+                    <span className="text-sm font-extrabold px-1">✕</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Core Display Content (PDF Viewer) */}
+              <div className="flex-1 overflow-auto bg-neutral-950 p-6 flex items-start justify-center relative">
+                {isPreviewLoading ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                    <RefreshCw className="w-10 h-10 animate-spin text-purple-500" />
+                    <p className="text-xs text-neutral-400 font-mono">Compiling sandbox buffers...</p>
+                  </div>
+                ) : (
+                  <div className="w-full h-full max-w-full flex justify-center">
+                    <PdfDocument
+                      file={previewPdfUrl}
+                      onLoadSuccess={({ numPages }) => setPreviewNumPages(numPages)}
+                      loading={
+                        <div className="flex flex-col items-center justify-center p-12 text-neutral-400">
+                          <RefreshCw className="w-8 h-8 animate-spin text-purple-500 mb-2" />
+                          <span>Streaming vector layers...</span>
+                        </div>
+                      }
+                      error={
+                        <div className="text-center p-12 text-red-400">
+                          <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+                          <span>PDF formatting load failed. Standard stream may be corrupted.</span>
+                        </div>
+                      }
+                      className="mx-auto"
+                    >
+                      <PdfPage 
+                        pageNumber={previewPageNumber} 
+                        scale={previewScale}
+                        renderTextLayer={false}
+                        renderAnnotationLayer={false}
+                        className="border border-neutral-800 rounded-xl overflow-hidden shadow-2xl mx-auto"
+                      />
+                    </PdfDocument>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer Controls */}
+              <div className="p-4 border-t border-neutral-800 bg-[#0f1524] flex flex-col sm:flex-row items-center justify-between text-xs gap-3">
+                <span className="text-[10px] text-neutral-500 font-mono hidden md:inline">
+                  Standard ISO-32000 PDF Compliant Renderer
+                </span>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setPreviewPageNumber(p => Math.max(1, p - 1))}
+                    disabled={previewPageNumber <= 1}
+                    className="px-3 py-1.5 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 rounded-xl text-neutral-300 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer font-bold text-xs"
+                  >
+                    Previous
+                  </button>
+
+                  <span className="text-xs text-neutral-300 font-mono">
+                    Page <strong className="text-white">{previewPageNumber}</strong> of <strong className="text-white">{previewNumPages || "?"}</strong>
+                  </span>
+
+                  <button
+                    onClick={() => setPreviewPageNumber(p => Math.min(previewNumPages || 1, p + 1))}
+                    disabled={previewPageNumber >= (previewNumPages || 1)}
+                    className="px-3 py-1.5 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 rounded-xl text-neutral-300 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer font-bold text-xs"
+                  >
+                    Next
+                  </button>
+                </div>
+
+                <span className="text-[10px] text-neutral-500 font-mono">
+                  Engine: PDFJS v{pdfjs.version}
+                </span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
