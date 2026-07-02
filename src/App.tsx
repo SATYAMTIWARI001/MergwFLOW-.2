@@ -28,6 +28,8 @@ import {
   Lock, 
   Eye, 
   Minimize2, 
+  Maximize,
+  Minimize,
   Layers3, 
   Share2, 
   Type, 
@@ -328,6 +330,7 @@ export default function App() {
 
   // PDF Preview Modal States
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const [isPreviewFullScreen, setIsPreviewFullScreen] = useState<boolean>(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string>("");
   const [previewPdfName, setPreviewPdfName] = useState<string>("");
   const [previewNumPages, setPreviewNumPages] = useState<number | null>(null);
@@ -341,6 +344,7 @@ export default function App() {
     setPreviewPageNumber(1);
     setPreviewScale(1.0);
     setPreviewPdfName(fileName);
+    setIsPreviewFullScreen(false);
     setIsPreviewOpen(true);
 
     try {
@@ -2097,14 +2101,20 @@ Here is the precise extraction:
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/85 backdrop-blur-md p-4"
+            className={`fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/85 backdrop-blur-md transition-all duration-300 ${
+              isPreviewFullScreen ? "p-0" : "p-4"
+            }`}
           >
             <motion.div 
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
               transition={{ type: "spring", duration: 0.4 }}
-              className="bg-[#0b0f19] border border-neutral-800 rounded-3xl w-full max-w-4xl h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+              className={`bg-[#0b0f19] flex flex-col shadow-2xl overflow-hidden transition-all duration-300 ${
+                isPreviewFullScreen 
+                  ? "w-screen h-screen max-w-none max-h-none rounded-none border-0" 
+                  : "border border-neutral-800 rounded-3xl w-full max-w-4xl h-[90vh]"
+              }`}
             >
               {/* Modal Header */}
               <div className="p-5 border-b border-neutral-800 bg-[#0f1524] flex items-center justify-between">
@@ -2142,6 +2152,25 @@ Here is the precise extraction:
                     </button>
                   </div>
 
+                  {/* Full Screen Toggle Button */}
+                  <button
+                    onClick={() => setIsPreviewFullScreen(!isPreviewFullScreen)}
+                    className="p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 hover:text-white rounded-xl transition-all flex items-center gap-1 cursor-pointer text-xs font-bold px-3"
+                    title={isPreviewFullScreen ? "Exit Full Screen" : "View Full Screen"}
+                  >
+                    {isPreviewFullScreen ? (
+                      <>
+                        <Minimize className="w-4 h-4 text-purple-400" />
+                        <span className="hidden sm:inline">Exit Full Screen</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize className="w-4 h-4 text-purple-400" />
+                        <span className="hidden sm:inline">Full Screen</span>
+                      </>
+                    )}
+                  </button>
+
                   {/* Direct Download Button */}
                   <button
                     onClick={() => {
@@ -2161,6 +2190,7 @@ Here is the precise extraction:
                   <button 
                     onClick={() => {
                       setIsPreviewOpen(false);
+                      setIsPreviewFullScreen(false);
                       // Avoid leaks if we created a temp url
                       if (previewPdfUrl.startsWith("blob:") && (!conversionResult || previewPdfUrl !== conversionResult.pdfUrl)) {
                         URL.revokeObjectURL(previewPdfUrl);
