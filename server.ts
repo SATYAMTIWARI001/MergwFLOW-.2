@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
+import XLSX from "xlsx";
+import pptxgen from "pptxgenjs";
 
 // Load environment variables
 dotenv.config();
@@ -53,10 +56,24 @@ async function generateWithGemini(prompt: string, systemInstruction?: string, re
       });
       return { text: response.text || "No response text generated.", source: "gemini" };
     } catch (err: any) {
-      console.error("Gemini Generation Error:", err);
+      const errMsg = err?.message || String(err);
+      const isLeaked = errMsg.toLowerCase().includes("leaked") || 
+                       errMsg.toLowerCase().includes("api key") || 
+                       errMsg.toLowerCase().includes("403") || 
+                       errMsg.toLowerCase().includes("permission_denied") || 
+                       errMsg.toLowerCase().includes("unauthorized");
+
+      if (isLeaked) {
+        console.log("CRITICAL: GEMINI_API_KEY reported as leaked or unauthorized. Safely disabling direct Gemini API calls and switching to advanced high-fidelity simulator mode.");
+        ai = null; // Permanently switch future requests to mock simulation
+      } else {
+        console.log("Gemini Generation Non-Fatal Issue:", errMsg);
+      }
+
       return { 
-        text: `[Simulator Fallback - API Error: ${err?.message || "Connection failed"}]\n\nBased on your prompt, here is a highly detailed result:\n\n` + getMockResponse(prompt), 
-        source: "simulator_error" 
+        text: `[Simulator Fallback - API Notice: ${errMsg}]\n\nBased on your prompt, here is a highly detailed result:\n\n` + getMockResponse(prompt), 
+        source: "simulator_error",
+        error: errMsg
       };
     }
   } else {
@@ -274,6 +291,140 @@ async function createRealPdf(fileName: string, content: string): Promise<Uint8Ar
   return await pdfDoc.save();
 }
 
+// Helper: Compile text layout into a real DOCX document binary buffer
+async function createRealDocx(content: string): Promise<Buffer> {
+  const doc = new Document({
+    sections: [
+      {
+        properties: {},
+        children: content.split("\n").map(line => {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            return new Paragraph({ text: "" });
+          }
+          if (trimmed.startsWith("# ")) {
+            return new Paragraph({
+              text: trimmed.replace("# ", ""),
+              heading: HeadingLevel.HEADING_1,
+            });
+          } else if (trimmed.startsWith("## ")) {
+            return new Paragraph({
+              text: trimmed.replace("## ", ""),
+              heading: HeadingLevel.HEADING_2,
+            });
+          } else if (trimmed.startsWith("### ")) {
+            return new Paragraph({
+              text: trimmed.replace("### ", ""),
+              heading: HeadingLevel.HEADING_3,
+            });
+          } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+            return new Paragraph({
+              text: trimmed.replace(/^[-*]\s+/, ""),
+              bullet: { level: 0 },
+            });
+          } else if (trimmed.startsWith("1. ") || trimmed.startsWith("2. ") || trimmed.startsWith("3. ")) {
+            return new Paragraph({
+              text: trimmed.replace(/^\d+\.\s+/, ""),
+              bullet: { level: 0 },
+            });
+          } else {
+            return new Paragraph({
+              children: [new TextRun(line)],
+            });
+          }
+        }),
+      },
+    ],
+  });
+  return await Packer.toBuffer(doc);
+}
+
+// Helper: Compile tabular/structured text layouts into a real Excel spreadsheet binary buffer
+function createRealXlsx(content: string): Buffer {
+  const rows: string[][] = [];
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const cells = trimmed.split("|").slice(1, -1).map(c => c.trim());
+      if (cells.some(c => c.includes("---"))) continue;
+      rows.push(cells);
+    } else if (trimmed.includes(",")) {
+      const cells = trimmed.split(",").map(c => c.trim().replace(/^"(.*)"$/, "$1"));
+      rows.push(cells);
+    } else {
+      const cells = trimmed.split("\t").map(c => c.trim());
+      rows.push(cells);
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Converted Data");
+  
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
+// Helper: Compile structured headings into a real slide-by-slide PowerPoint binary buffer
+async function createRealPptx(content: string): Promise<Buffer> {
+  const pptx = new pptxgen();
+  const lines = content.split("\n");
+  
+  let slideTitle = "Presentation Overview";
+  let slideContent: string[] = [];
+
+  const addSlideHelper = () => {
+    if (slideContent.length > 0 || slideTitle !== "Presentation Overview") {
+      const slide = pptx.addSlide();
+      slide.background = { fill: "0F172A" }; // Premium dark theme matching Merge Flow branding
+
+      slide.addText(slideTitle, {
+        x: 0.5,
+        y: 0.5,
+        w: "90%",
+        h: 1.0,
+        fontSize: 24,
+        bold: true,
+        color: "F8FAFC",
+        fontFace: "Arial"
+      });
+
+      slide.addText(slideContent.join("\n"), {
+        x: 0.5,
+        y: 1.8,
+        w: "90%",
+        h: 4.5,
+        fontSize: 14,
+        color: "CBD5E1",
+        fontFace: "Arial",
+        bullet: true
+      });
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (trimmed.startsWith("# ") || trimmed.startsWith("## ")) {
+      addSlideHelper();
+      slideTitle = trimmed.replace(/^##?\s+/, "");
+      slideContent = [];
+    } else {
+      const cleanLine = trimmed.replace(/^[-*\d\.]+\s+/, "");
+      if (cleanLine) {
+        slideContent.push(cleanLine);
+      }
+    }
+  }
+
+  addSlideHelper();
+  const buffer = await pptx.write("nodebuffer" as any);
+  return buffer as Buffer;
+}
+
 // 2. AI Document Converter API
 app.post("/api/convert", async (req, res) => {
   const { fileName, fileType, targetFormat, content, isBase64 } = req.body;
@@ -314,10 +465,37 @@ app.post("/api/convert", async (req, res) => {
       }
     }
 
+    let base64Content = "";
+    const targetLower = targetFormat.toLowerCase();
+    
+    if (targetLower === "docx") {
+      try {
+        const docBuffer = await createRealDocx(result.text);
+        base64Content = docBuffer.toString("base64");
+      } catch (docxErr: any) {
+        console.error("Error creating real docx:", docxErr);
+      }
+    } else if (targetLower === "xlsx") {
+      try {
+        const xlsxBuffer = createRealXlsx(result.text);
+        base64Content = xlsxBuffer.toString("base64");
+      } catch (xlsxErr: any) {
+        console.error("Error creating real xlsx:", xlsxErr);
+      }
+    } else if (targetLower === "pptx") {
+      try {
+        const pptxBuffer = await createRealPptx(result.text);
+        base64Content = pptxBuffer.toString("base64");
+      } catch (pptxErr: any) {
+        console.error("Error creating real pptx:", pptxErr);
+      }
+    }
+
     res.json({
       success: true,
-      fileName: fileName.replace(/\.[^/.]+$/, "") + `.${targetFormat.toLowerCase()}`,
+      fileName: fileName.replace(/\.[^/.]+$/, "") + `.${targetLower}`,
       convertedContent: result.text,
+      base64Content: base64Content || undefined,
       source: result.source,
     });
   } catch (error: any) {
@@ -355,6 +533,7 @@ app.post("/api/generate-pdf", async (req, res) => {
     success: true,
     markdown: result.text,
     source: result.source,
+    apiError: (result as any).error || null,
   });
 });
 
@@ -412,6 +591,7 @@ app.post("/api/commands", async (req, res) => {
     success: true,
     result: result.text,
     source: result.source,
+    apiError: (result as any).error || null,
   });
 });
 
@@ -448,7 +628,19 @@ app.post("/api/ocr", async (req, res) => {
         source: "gemini-ocr",
       });
     } catch (err: any) {
-      console.error("Gemini OCR Error:", err);
+      const errMsg = err?.message || String(err);
+      const isLeaked = errMsg.toLowerCase().includes("leaked") || 
+                       errMsg.toLowerCase().includes("api key") || 
+                       errMsg.toLowerCase().includes("403") || 
+                       errMsg.toLowerCase().includes("permission_denied") || 
+                       errMsg.toLowerCase().includes("unauthorized");
+
+      if (isLeaked) {
+        console.log("CRITICAL: GEMINI_API_KEY reported as leaked or unauthorized during OCR. Safely disabling direct Gemini API calls.");
+        ai = null; // Permanently switch future requests to mock simulation
+      } else {
+        console.log("Gemini OCR Non-Fatal Issue:", errMsg);
+      }
       // Fallback to high-fidelity parser
     }
   }
@@ -501,6 +693,7 @@ app.post("/api/chat", async (req, res) => {
     success: true,
     response: result.text,
     source: result.source,
+    apiError: (result as any).error || null,
   });
 });
 

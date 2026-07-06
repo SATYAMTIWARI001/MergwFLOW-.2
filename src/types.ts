@@ -33,6 +33,7 @@ export interface DocumentProfile {
   convertedContent?: string;
   ocrText?: string;
   favorite?: boolean;
+  fileData?: string;
 }
 
 export interface ChatMessage {
