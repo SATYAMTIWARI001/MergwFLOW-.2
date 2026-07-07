@@ -61,8 +61,16 @@ import { INITIAL_FILES, INITIAL_STORAGE, INITIAL_HISTORY } from "./data";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from "react-pdf";
 
-// Configure react-pdf worker source using official UNPKG CDN matching the package version
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+// Configure react-pdf worker source using a same-origin Blob wrapper to prevent cross-origin iframe security/CORS issues
+const workerUrl = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
+try {
+  const blobCode = `importScripts(${JSON.stringify(workerUrl)});`;
+  const blob = new Blob([blobCode], { type: "application/javascript" });
+  pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+} catch (e) {
+  // Safe fallback if Blob creation is blocked or fails
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+}
 
 // Helper: Map file formats to standard MIME types
 function getMimeType(format: string): string {
