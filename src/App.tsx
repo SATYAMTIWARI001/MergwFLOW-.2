@@ -1211,7 +1211,8 @@ export default function App() {
             fileType: activeFile.type,
             targetFormat: target,
             content: activeFile.content || activeFile.ocrText || "",
-            isBase64: false
+            fileData: activeFile.fileData || "",
+            isBase64: !!activeFile.fileData
           })
         });
 

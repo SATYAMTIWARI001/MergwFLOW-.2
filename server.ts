@@ -7,6 +7,8 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import XLSX from "xlsx";
 import pptxgen from "pptxgenjs";
+import officeParser from "officeparser";
+import mammoth from "mammoth";
 
 // Load environment variables
 dotenv.config();
@@ -425,79 +427,270 @@ async function createRealPptx(content: string): Promise<Buffer> {
   return buffer as Buffer;
 }
 
-// 2. AI Document Converter API
+// Helper: Extract buffer from base64 Data URL
+function getBufferFromDataUrl(dataUrl: string): Buffer {
+  if (!dataUrl) return Buffer.alloc(0);
+  const matches = dataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+  if (matches && matches.length === 3) {
+    return Buffer.from(matches[2], "base64");
+  }
+  if (dataUrl.includes(";base64,")) {
+    const parts = dataUrl.split(";base64,");
+    return Buffer.from(parts[1], "base64");
+  }
+  return Buffer.from(dataUrl, "base64");
+}
+
+// Helper: Promise-wrapped officeParser.parseOffice
+function parseOfficePromise(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    officeParser.parseOffice(buffer, (data: any, err: any) => {
+      if (err) {
+        reject(err);
+      } else {
+        const textContent = typeof data === "string" ? data : (data ? String(data) : "");
+        resolve(textContent);
+      }
+    });
+  });
+}
+
+// Helper: Extract raw text/structured text from file buffers completely offline
+async function extractTextFromBuffer(buffer: Buffer, ext: string): Promise<string> {
+  const format = ext.toLowerCase().replace(/^\./, "");
+  try {
+    if (format === "docx" || format === "doc") {
+      const result = await mammoth.extractRawText({ buffer });
+      return result.value || "";
+    } else if (format === "xlsx" || format === "xls") {
+      const workbook = XLSX.read(buffer, { type: "buffer" });
+      let output = "";
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const csv = XLSX.utils.sheet_to_csv(sheet);
+        output += `### SHEET: ${sheetName}\n${csv}\n\n`;
+      });
+      return output;
+    } else if (format === "pdf") {
+      const text = await parseOfficePromise(buffer);
+      return text || "";
+    } else if (format === "pptx" || format === "ppt") {
+      const text = await parseOfficePromise(buffer);
+      return text || "";
+    } else if (["txt", "md", "html", "csv", "json", "rtf", "xml"].includes(format)) {
+      return buffer.toString("utf-8");
+    } else {
+      const text = await parseOfficePromise(buffer);
+      return text || "";
+    }
+  } catch (err) {
+    console.error(`Error in extractTextFromBuffer for format "${format}":`, err);
+    return "";
+  }
+}
+
+// Helper: Offline converter to HTML
+function convertTextToHtmlOffline(text: string, title: string): string {
+  const lines = text.split("\n");
+  let body = "";
+  let inList = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (inList) {
+        body += "</ul>\n";
+        inList = false;
+      }
+      body += "<p>&nbsp;</p>\n";
+      continue;
+    }
+    
+    if (trimmed.startsWith("# ")) {
+      if (inList) { body += "</ul>\n"; inList = false; }
+      body += `<h1>${trimmed.substring(2)}</h1>\n`;
+    } else if (trimmed.startsWith("## ")) {
+      if (inList) { body += "</ul>\n"; inList = false; }
+      body += `<h2>${trimmed.substring(3)}</h2>\n`;
+    } else if (trimmed.startsWith("### ")) {
+      if (inList) { body += "</ul>\n"; inList = false; }
+      body += `<h3>${trimmed.substring(4)}</h3>\n`;
+    } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      if (!inList) {
+        body += "<ul>\n";
+        inList = true;
+      }
+      body += `  <li>${trimmed.substring(2)}</li>\n`;
+    } else {
+      if (inList) { body += "</ul>\n"; inList = false; }
+      body += `<p>${trimmed}</p>\n`;
+    }
+  }
+  if (inList) {
+    body += "</ul>\n";
+  }
+  
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${title}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1e293b; }
+    h1 { color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+    h2 { color: #1e293b; margin-top: 24px; }
+    h3 { color: #334155; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 4px; }
+    p { margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  ${body}
+</body>
+</html>`;
+}
+
+// Helper: Offline converter to Markdown
+function convertTextToMarkdownOffline(text: string, title: string): string {
+  if (text.includes("# ") || text.includes("**") || text.includes("- ")) {
+    return text;
+  }
+  
+  const lines = text.split("\n");
+  let output = `# ${title.replace(/\.[^/.]+$/, "")}\n\n`;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      output += "\n";
+    } else if (trimmed.length < 60 && !trimmed.endsWith(".") && !trimmed.endsWith(",") && !trimmed.includes(" ")) {
+      output += `## ${trimmed}\n\n`;
+    } else {
+      output += `${trimmed}\n\n`;
+    }
+  }
+  return output;
+}
+
+// Helper: Offline converter to CSV
+function convertTextToCsvOffline(text: string): string {
+  const lines = text.split("\n");
+  let csv = "";
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    let cells: string[] = [];
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      cells = trimmed.split("|").slice(1, -1).map(c => c.trim());
+      if (cells.some(c => c.includes("---"))) continue;
+    } else if (trimmed.includes(",")) {
+      cells = trimmed.split(",").map(c => c.trim().replace(/^"(.*)"$/, "$1"));
+    } else {
+      cells = trimmed.split(/\t+/).map(c => c.trim());
+    }
+    
+    const formattedLine = cells.map(cell => {
+      const clean = cell.replace(/"/g, '""');
+      return clean.includes(",") || clean.includes("\n") || clean.includes('"') ? `"${clean}"` : clean;
+    }).join(",");
+    
+    csv += formattedLine + "\n";
+  }
+  return csv;
+}
+
+// Helper: Offline converter to JSON
+function convertTextToJsonOffline(text: string, fileName: string): string {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const data = {
+    documentName: fileName,
+    convertedAt: new Date().toISOString(),
+    paragraphs: lines
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+// 2. Real Document Converter API (100% Offline and Precise)
 app.post("/api/convert", async (req, res) => {
-  const { fileName, fileType, targetFormat, content, isBase64 } = req.body;
+  const { fileName, fileType, targetFormat, content, fileData, isBase64 } = req.body;
 
   if (!fileName || !targetFormat) {
     return res.status(400).json({ error: "Missing required parameters: fileName and targetFormat" });
   }
 
-  const fileTextContent = isBase64 ? "[Binary/Image content processed]" : (content || "Empty content");
+  const sourceExt = (fileType || fileName.split(".").pop() || "").toLowerCase().replace(/^\./, "");
+  const targetExt = targetFormat.toLowerCase().replace(/^\./, "");
 
-  const prompt = `Convert the document "${fileName}" (type: ${fileType}) into target format "${targetFormat}".
-  Original content context (either text or descriptor):
-  "${fileTextContent.substring(0, 5000)}"
-
-  Please perform a highly professional format conversion. Respond ONLY with the fully converted output styled appropriately for the "${targetFormat}" target format. If target format is Markdown, HTML, JSON, CSV, SVG, or plain text, provide the raw converted code. If it's Word/PowerPoint/Excel, structure the output with clear headers and layouts that can be saved as that format.`;
-
-  const systemPrompt = "You are an expert file converter and multi-format document engine. Convert the source text or structure into the requested format precisely, retaining all information and improving presentation.";
+  console.log(`[API CONVERT] Request received: Converting "${fileName}" (${sourceExt}) to "${targetExt}"`);
 
   try {
-    const result = await generateWithGemini(prompt, systemPrompt);
-    
-    if (targetFormat.toLowerCase() === "pdf") {
-      try {
-        const outputFileName = fileName.replace(/\.[^/.]+$/, "") + ".pdf";
-        const pdfBytes = await createRealPdf(outputFileName, result.text);
-        
-        if (!pdfBytes || pdfBytes.length === 0) {
-          throw new Error("Generated PDF bytes are empty");
-        }
+    let sourceContent = content || "";
+    let fileBuffer: Buffer | null = null;
 
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(outputFileName)}"`);
-        res.setHeader("Content-Length", pdfBytes.length.toString());
-        return res.send(Buffer.from(pdfBytes));
-      } catch (pdfError: any) {
-        console.error("Error generating binary PDF:", pdfError);
-        return res.status(500).json({ error: `PDF Layout compiler error: ${pdfError.message || pdfError}` });
+    if (fileData) {
+      fileBuffer = getBufferFromDataUrl(fileData);
+      if (fileBuffer && fileBuffer.length > 0) {
+        const extracted = await extractTextFromBuffer(fileBuffer, sourceExt);
+        if (extracted && extracted.trim() !== "") {
+          sourceContent = extracted;
+          console.log(`[API CONVERT] Successfully parsed real file buffer. Length: ${sourceContent.length} chars.`);
+        }
       }
     }
 
+    if (!sourceContent || sourceContent.trim() === "") {
+      sourceContent = `Empty Document Ingested\nThis file is empty or could not be read.`;
+    }
+
+    let outputBuffer: Buffer | Uint8Array | null = null;
+    let convertedText = sourceContent;
+
+    if (targetExt === "pdf") {
+      const outputFileName = fileName.replace(/\.[^/.]+$/, "") + ".pdf";
+      outputBuffer = await createRealPdf(outputFileName, sourceContent);
+    } else if (targetExt === "docx") {
+      outputBuffer = await createRealDocx(sourceContent);
+    } else if (targetExt === "xlsx") {
+      outputBuffer = createRealXlsx(sourceContent);
+    } else if (targetExt === "pptx") {
+      outputBuffer = await createRealPptx(sourceContent);
+    } else if (targetExt === "html") {
+      convertedText = convertTextToHtmlOffline(sourceContent, fileName);
+    } else if (targetExt === "md") {
+      convertedText = convertTextToMarkdownOffline(sourceContent, fileName);
+    } else if (targetExt === "txt") {
+      convertedText = sourceContent;
+    } else if (targetExt === "csv") {
+      convertedText = convertTextToCsvOffline(sourceContent);
+    } else if (targetExt === "json") {
+      convertedText = convertTextToJsonOffline(sourceContent, fileName);
+    }
+
+    if (targetExt === "pdf") {
+      if (!outputBuffer || outputBuffer.length === 0) {
+        throw new Error("Generated PDF binary content is empty (0 bytes).");
+      }
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName.replace(/\.[^/.]+$/, "") + ".pdf")}"`);
+      res.setHeader("Content-Length", outputBuffer.length.toString());
+      return res.send(Buffer.from(outputBuffer));
+    }
+
     let base64Content = "";
-    const targetLower = targetFormat.toLowerCase();
-    
-    if (targetLower === "docx") {
-      try {
-        const docBuffer = await createRealDocx(result.text);
-        base64Content = docBuffer.toString("base64");
-      } catch (docxErr: any) {
-        console.error("Error creating real docx:", docxErr);
-      }
-    } else if (targetLower === "xlsx") {
-      try {
-        const xlsxBuffer = createRealXlsx(result.text);
-        base64Content = xlsxBuffer.toString("base64");
-      } catch (xlsxErr: any) {
-        console.error("Error creating real xlsx:", xlsxErr);
-      }
-    } else if (targetLower === "pptx") {
-      try {
-        const pptxBuffer = await createRealPptx(result.text);
-        base64Content = pptxBuffer.toString("base64");
-      } catch (pptxErr: any) {
-        console.error("Error creating real pptx:", pptxErr);
-      }
+    if (outputBuffer) {
+      base64Content = Buffer.from(outputBuffer).toString("base64");
     }
 
     res.json({
       success: true,
-      fileName: fileName.replace(/\.[^/.]+$/, "") + `.${targetLower}`,
-      convertedContent: result.text,
+      fileName: fileName.replace(/\.[^/.]+$/, "") + `.${targetExt}`,
+      convertedContent: convertedText,
       base64Content: base64Content || undefined,
-      source: result.source,
+      source: "Offline Sandbox Conversion Engine"
     });
+
   } catch (error: any) {
     console.error("Conversion API Error:", error);
     res.status(500).json({ error: `Document conversion pipeline failed: ${error.message || error}` });
