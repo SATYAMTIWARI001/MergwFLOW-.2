@@ -1562,6 +1562,35 @@ Here is the precise extraction:
     });
   };
 
+  const getPagesToExtractCount = (rangeStr: string): number => {
+    const clean = rangeStr.replace(/\s+/g, "");
+    if (!clean) return 0;
+    const parts = clean.split(",");
+    const uniquePages = new Set<number>();
+    
+    for (const part of parts) {
+      if (!part) continue;
+      if (part.includes("-")) {
+        const subParts = part.split("-");
+        if (subParts.length === 2) {
+          const start = parseInt(subParts[0], 10);
+          const end = parseInt(subParts[1], 10);
+          if (!isNaN(start) && !isNaN(end) && start <= end) {
+            for (let i = start; i <= end; i++) {
+              uniquePages.add(i);
+            }
+          }
+        }
+      } else {
+        const page = parseInt(part, 10);
+        if (!isNaN(page)) {
+          uniquePages.add(page);
+        }
+      }
+    }
+    return uniquePages.size;
+  };
+
   const runSplitPDFAction = () => {
     if (!activeFile) {
       alert("No active document found to split. Please upload or select a document in the Workspace first!");
@@ -2711,7 +2740,14 @@ Here is the precise extraction:
                       </div>
                       <div className="space-y-2">
                         <div>
-                          <span className="block font-bold text-sm text-neutral-200">{tool.label}</span>
+                          <div className="flex items-center justify-between">
+                            <span className="block font-bold text-sm text-neutral-200">{tool.label}</span>
+                            {splitPageRange.trim() && (
+                              <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-md border border-purple-500/25 font-bold font-mono" id="split-page-count-badge">
+                                {getPagesToExtractCount(splitPageRange)} {getPagesToExtractCount(splitPageRange) === 1 ? 'page' : 'pages'}
+                              </span>
+                            )}
+                          </div>
                           <span className="block text-[11px] text-neutral-500 mt-0.5 leading-tight">{tool.desc}</span>
                         </div>
                         <div className="flex gap-1.5 items-center">
