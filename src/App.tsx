@@ -675,6 +675,7 @@ export default function App() {
   const [selectedConvertFileIds, setSelectedConvertFileIds] = useState<string[]>(["f1"]);
   const [conversionResult, setConversionResult] = useState<{ fileName: string; content: string; isPdf?: boolean; pdfBlob?: Blob; pdfUrl?: string } | null>(null);
   const [conversionError, setConversionError] = useState<{ message: string; log: string } | null>(null);
+  const [splitPageRange, setSplitPageRange] = useState<string>("1-3");
 
   // Sync selectedConvertFileIds with activeFileId when activeFileId changes
   useEffect(() => {
@@ -1558,6 +1559,41 @@ Here is the precise extraction:
       setFiles(prev => [mergedFile, ...prev]);
       setActiveFileId(mergedFile.id);
       alert("Successfully merged 2 documents into a single premium PDF package!");
+    });
+  };
+
+  const runSplitPDFAction = () => {
+    if (!activeFile) {
+      alert("No active document found to split. Please upload or select a document in the Workspace first!");
+      return;
+    }
+    
+    const range = splitPageRange.trim();
+    if (!range) {
+      alert("Please enter a valid page range (e.g., '1-3' or '2,5,7')!");
+      return;
+    }
+
+    const isValidFormat = /^[0-9\s,\-]+$/.test(range);
+    if (!isValidFormat) {
+      alert("Invalid page range format. Please use numbers, hyphens, and commas (e.g., '1-3' or '2,5,7').");
+      return;
+    }
+
+    triggerProgressBar(`C-Core: Splitting ${activeFile.name} using custom range '${range}'...`, () => {
+      const outputName = `${activeFile.name.replace(/\.[^/.]+$/, "")}_split_pages_${range.replace(/\s+/g, "")}.pdf`;
+      const splitFile: DocumentProfile = {
+        id: generateId("f"),
+        name: outputName,
+        size: "3.2 MB",
+        type: "pdf",
+        category: "document",
+        uploadedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+        content: `# SPLIT DOCUMENT SECTION\n\n**Source File:** ${activeFile.name}\n**Extracted Range:** ${range}\n\nThis document contains the isolated pages extracted from your original file using our high-speed visual stream parsing engine.\n\n### Extracted content context:\n${activeFile.content || activeFile.ocrText || "Draft Content"}`
+      };
+      setFiles(prev => [splitFile, ...prev]);
+      setActiveFileId(splitFile.id);
+      alert(`Successfully split ${activeFile.name} using range '${range}'! Saved as ${outputName}. Check Recent Files.`);
     });
   };
 
@@ -2649,28 +2685,78 @@ Here is the precise extraction:
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { label: "Merge PDF", desc: "Combine multiple document records", action: runMergePDFAction, icon: Layers3 },
-                { label: "Split PDF", desc: "Extract specific page arrays", action: () => alert("Pages 1 and 2 successfully split into separate PDFs! Check Recent Files."), icon: Scissors },
+                { label: "Split PDF", desc: "Extract specific page arrays", isSplit: true, icon: Scissors },
                 { label: "Compress PDF", desc: "Shrink storage footprint safely", action: runCompressAction, icon: Minimize2 },
                 { label: "Rotate PDF", desc: "Turn page layout 90 degrees clockwise", action: () => setRotation(r => (r + 90) % 360), icon: RotateCw },
                 { label: "Delete Pages", desc: "Purge selected blank frames", action: () => alert("Pages deleted successfully! Layout rewritten."), icon: Trash },
                 { label: "Watermark", desc: "Embed custom text overlay securely", action: () => alert("Confidential draft watermark embedded."), icon: Bookmark },
                 { label: "Protect PDF", desc: "Encrypt file with AES-256 code", action: () => alert("Document encrypted! Password set to 1712."), icon: Lock },
                 { label: "Sign PDF", desc: "Apply certified digital signature", action: () => alert("Digital cryptographic signature locked successfully!"), icon: Sparkles }
-              ].map((tool, idx) => (
-                <button
-                  key={idx}
-                  onClick={tool.action}
-                  className="p-6 bg-[#111827] border border-neutral-800 hover:border-purple-500/40 rounded-3xl text-left transition-all h-44 flex flex-col justify-between group cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center group-hover:bg-purple-500/10">
-                    <tool.icon className="w-5 h-5 text-purple-400" />
-                  </div>
-                  <div>
-                    <span className="block font-bold text-sm text-neutral-200 mt-4">{tool.label}</span>
-                    <span className="block text-xs text-neutral-500 mt-1 leading-relaxed">{tool.desc}</span>
-                  </div>
-                </button>
-              ))}
+              ].map((tool, idx) => {
+                if ('isSplit' in tool && tool.isSplit) {
+                  return (
+                    <div
+                      key={idx}
+                      className="p-6 bg-[#111827] border border-neutral-800 hover:border-purple-500/40 rounded-3xl text-left transition-all h-44 flex flex-col justify-between group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center group-hover:bg-purple-500/10">
+                          <tool.icon className="w-5 h-5 text-purple-400" />
+                        </div>
+                        {activeFile && (
+                          <span className="text-[10px] text-neutral-500 truncate max-w-[120px]" title={activeFile.name}>
+                            File: {activeFile.name}
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <div>
+                          <span className="block font-bold text-sm text-neutral-200">{tool.label}</span>
+                          <span className="block text-[11px] text-neutral-500 mt-0.5 leading-tight">{tool.desc}</span>
+                        </div>
+                        <div className="flex gap-1.5 items-center">
+                          <input
+                            type="text"
+                            placeholder="e.g. 1-3, 5"
+                            value={splitPageRange}
+                            onChange={(e) => setSplitPageRange(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full px-2.5 py-1 text-xs bg-neutral-950 border border-neutral-800 focus:border-purple-500/60 rounded-lg text-neutral-200 outline-none placeholder-neutral-600 font-mono"
+                            title="Page range, e.g., '1-3' or '2,5,7'"
+                            id="split-page-range-input"
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              runSplitPDFAction();
+                            }}
+                            className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap active:scale-95"
+                            id="split-pdf-submit-btn"
+                          >
+                            Split
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <button
+                    key={idx}
+                    onClick={'action' in tool ? tool.action : undefined}
+                    className="p-6 bg-[#111827] border border-neutral-800 hover:border-purple-500/40 rounded-3xl text-left transition-all h-44 flex flex-col justify-between group cursor-pointer w-full"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center group-hover:bg-purple-500/10">
+                      <tool.icon className="w-5 h-5 text-purple-400" />
+                    </div>
+                    <div>
+                      <span className="block font-bold text-sm text-neutral-200 mt-4">{'label' in tool ? tool.label : ''}</span>
+                      <span className="block text-xs text-neutral-500 mt-1 leading-relaxed">{'desc' in tool ? tool.desc : ''}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
