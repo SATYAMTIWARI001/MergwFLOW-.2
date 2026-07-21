@@ -1650,6 +1650,42 @@ Here is the precise extraction:
     }
   };
 
+  const handleDownloadFile = (file: DocumentProfile) => {
+    if (!file) return;
+    try {
+      let blob: Blob;
+      let url: string;
+
+      if (file.fileData) {
+        const matches = file.fileData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const binaryString = window.atob(matches[2]);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          blob = new Blob([bytes], { type: matches[1] });
+        } else {
+          blob = new Blob([file.content || file.ocrText || ""], { type: getMimeType(file.type) });
+        }
+      } else {
+        blob = new Blob([file.content || file.ocrText || ""], { type: getMimeType(file.type) });
+      }
+
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (err: any) {
+      console.error("Failed to download document:", err);
+      alert(`Download failed: ${err.message || String(err)}`);
+    }
+  };
+
   return (
     <div className={`min-h-screen transition-colors duration-300 font-sans ${highContrast ? "bg-black text-white" : darkMode ? "bg-[#09090B] text-neutral-100" : "bg-neutral-50 text-neutral-900"}`}>
       
@@ -2339,6 +2375,17 @@ Here is the precise extraction:
                         </div>
                         <div className="flex gap-2">
                           <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownloadFile(f);
+                            }}
+                            className="p-1.5 rounded hover:bg-neutral-800 text-neutral-500 hover:text-cyan-400"
+                            title="Download Document"
+                            id={`download-file-btn-${f.id}`}
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button 
                             onClick={() => handleToggleFavorite(f.id)}
                             className={`p-1.5 rounded hover:bg-neutral-800 ${f.favorite ? "text-amber-400" : "text-neutral-500"}`}
                           >
@@ -2407,6 +2454,18 @@ Here is the precise extraction:
                           <tool.icon className="w-3.5 h-3.5" />
                         </button>
                       ))}
+
+                      {activeFile && (
+                        <button
+                          onClick={() => handleDownloadFile(activeFile)}
+                          className="p-1.5 bg-cyan-600/10 hover:bg-cyan-600/20 text-cyan-400 border border-cyan-500/20 rounded hover:text-white ml-1.5 flex items-center gap-1 text-[11px] font-bold transition-all cursor-pointer"
+                          title="Download Viewed File"
+                          id="download-viewed-file-btn"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -2726,7 +2785,7 @@ Here is the precise extraction:
                   return (
                     <div
                       key={idx}
-                      className="p-6 bg-[#111827] border border-neutral-800 hover:border-purple-500/40 rounded-3xl text-left transition-all h-44 flex flex-col justify-between group"
+                      className="p-6 bg-[#111827] border border-neutral-800 hover:border-purple-500/40 rounded-3xl text-left transition-all min-h-[176px] flex flex-col justify-between group"
                     >
                       <div className="flex items-center justify-between">
                         <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center group-hover:bg-purple-500/10">
@@ -2748,7 +2807,26 @@ Here is the precise extraction:
                               </span>
                             )}
                           </div>
-                          <span className="block text-[11px] text-neutral-500 mt-0.5 leading-tight">{tool.desc}</span>
+                          <div className="flex items-center justify-between mt-0.5" onClick={(e) => e.stopPropagation()}>
+                            <span className="block text-[11px] text-neutral-500 leading-tight">{tool.desc}</span>
+                            <label className="flex items-center gap-1 cursor-pointer text-[10px] text-neutral-400 hover:text-purple-300 font-medium select-none shrink-0 ml-1.5">
+                              <input 
+                                type="checkbox"
+                                checked={splitPageRange === (activeFile?.category === "image" || ["jpg", "jpeg", "png", "webp"].includes(activeFile?.type.toLowerCase() || "") ? "1" : "1-3")}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    const isImg = activeFile?.category === "image" || ["jpg", "jpeg", "png", "webp"].includes(activeFile?.type.toLowerCase() || "");
+                                    setSplitPageRange(isImg ? "1" : "1-3");
+                                  } else {
+                                    setSplitPageRange("");
+                                  }
+                                }}
+                                className="w-3 h-3 accent-purple-600 rounded bg-neutral-950 border-neutral-800 cursor-pointer"
+                                id="all-pages-checkbox"
+                              />
+                              <span>All Pages</span>
+                            </label>
+                          </div>
                         </div>
                         <div className="flex gap-1.5 items-center">
                           <input
